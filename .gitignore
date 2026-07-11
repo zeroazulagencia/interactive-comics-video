@@ -1,0 +1,23 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+__pycache__/
+venv/
+.venv/
+
+# Next.js
+.next/
+
+# Prisma / SQLite
+prisma/dev.db
+prisma/dev.db-journal
+
+# Imágenes generadas
+public/generated/
+
+# OS
+.DS_Store

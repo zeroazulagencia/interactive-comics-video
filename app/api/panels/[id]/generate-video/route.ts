@@ -1,0 +1,62 @@
+import { NextResponse } from "next/server";
+import { readFile, writeFile, mkdir } from "fs/promises";
+import path from "path";
+import { prisma } from "@/lib/prisma";
+import { generateVideo } from "@/lib/replicate";
+
+export const maxDuration = 300;
+
+// POST /api/panels/:id/generate-video — anima la ilustración con prunaai/p-video
+export async function POST(req: Request, { params }: { params: { id: string } }) {
+  const panel = await prisma.panel.findUnique({
+    where: { id: params.id },
+    include: { scene: { include: { comic: true } } },
+  });
+  if (!panel) {
+    return NextResponse.json({ error: "Panel no encontrado" }, { status: 404 });
+  }
+  if (!panel.imageUrl) {
+    return NextResponse.json(
+      { error: "Genera primero la ilustración de este panel." },
+      { status: 400 }
+    );
+  }
+  if (!panel.videoPrompt?.trim()) {
+    return NextResponse.json(
+      { error: "Este panel no tiene prompt de animación." },
+      { status: 400 }
+    );
+  }
+
+  const body = await req.json().catch(() => ({}));
+  const duration = Math.max(1, Math.min(20, body.duration ?? 5));
+  const aspectRatio = panel.scene.comic.aspectRatio === "vertical" ? "9:16" : "16:9";
+
+  try {
+    const imagePath = path.join(process.cwd(), "public", panel.imageUrl);
+    const imageBuffer = await readFile(imagePath);
+    const mime = panel.imageUrl.endsWith(".png") ? "image/png" : "image/jpeg";
+    const imageDataUri = `data:${mime};base64,${imageBuffer.toString("base64")}`;
+
+    const videoSourceUrl = await generateVideo(imageDataUri, panel.videoPrompt, duration, aspectRatio);
+
+    const videoRes = await fetch(videoSourceUrl);
+    if (!videoRes.ok) throw new Error("No se pudo descargar el video generado.");
+    const buffer = Buffer.from(await videoRes.arrayBuffer());
+
+    const dir = path.join(process.cwd(), "public", "generated");
+    await mkdir(dir, { recursive: true });
+    const filename = `${panel.id}-${Date.now()}.mp4`;
+    await writeFile(path.join(dir, filename), buffer);
+
+    const videoUrl = `/generated/${filename}`;
+    const updated = await prisma.panel.update({
+      where: { id: panel.id },
+      data: { videoUrl },
+    });
+    return NextResponse.json(updated);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Error generando el video";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}

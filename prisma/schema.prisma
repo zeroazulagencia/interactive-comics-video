@@ -1,0 +1,58 @@
+// Prisma schema — Interactive Comics Video
+// Modelo: Comic -> Scene -> Panel (2 ilustraciones/animaciones por escena)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Comic {
+  id            String   @id @default(cuid())
+  title         String
+  author        String   @default("Cristian Parada")
+  subtitlesEnabled Boolean @default(true) // subtítulos activados/desactivados
+  prompt        String? // idea/historia inicial
+  artStyle      String? // estilo de ilustración (se aplica a todas las escenas)
+  aspectRatio   String   @default("horizontal") // "horizontal" (16:9, YouTube) | "vertical" (9:16, Instagram/Reels)
+  coverImage    String?
+  published     Boolean  @default(false)
+  finalVideoUrl String? // mp4 final: escenas + narración + música + títulos, mezclado con ffmpeg
+  scenes        Scene[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Scene {
+  id        String   @id @default(cuid())
+  comic     Comic    @relation(fields: [comicId], references: [id], onDelete: Cascade)
+  comicId   String
+  order     Int      @default(0)
+  title     String?
+  summary   String? // qué sucede en la escena (breve)
+  narration String? // locución / texto narrativo, hasta ~3 párrafos
+  audioUrl  String? // narración generada con Replicate (minimax/speech-02-hd)
+  panels    Panel[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([comicId])
+}
+
+model Panel {
+  id          String   @id @default(cuid())
+  scene       Scene    @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  sceneId     String
+  order       Int      @default(0) // 1 o 2: momento dentro de la escena
+  imagePrompt String? // prompt muy detallado de la ilustración
+  imageUrl    String? // se rellena al generar con gpt-image-1
+  videoPrompt String? // descripción del movimiento a animar en la imagen
+  videoUrl    String? // animación generada con Replicate (wan-video/wan2.1-with-lora)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([sceneId])
+}

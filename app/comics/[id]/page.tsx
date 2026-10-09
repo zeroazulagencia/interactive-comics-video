@@ -30,6 +30,7 @@ type Comic = {
   artStyle: string | null;
   aspectRatio: string;
   finalVideoUrl: string | null;
+  finalVideoOutdated: boolean;
   scenes: Scene[];
 };
 
@@ -80,7 +81,6 @@ export default function ComicDetail() {
   const [generating, setGenerating] = useState(false);
   const [savingMeta, setSavingMeta] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
 
   const [batch, setBatch] = useState<{
     kind: "audios" | "imágenes" | "animaciones";
@@ -94,22 +94,25 @@ export default function ComicDetail() {
 
   const [page, setPage] = useState(0);
 
-  async function load() {
+  // Recarga el comic. Con `syncForm` también reemplaza los campos de la
+  // cabecera; sin él se conservan las ediciones no guardadas.
+  async function load(syncForm = false) {
     const res = await fetch(`/api/comics/${id}`);
     if (!res.ok) return setNotFound(true);
     const data: Comic = await res.json();
     setComic(data);
-    setTitle(data.title);
-    setPrompt(data.prompt ?? "");
-    setArtStyle(data.artStyle ?? "");
-    setAuthor(data.author ?? "Cristian Parada");
-    setSubtitlesEnabled(data.subtitlesEnabled ?? true);
-    setRefreshKey((k) => k + 1);
+    if (syncForm) {
+      setTitle(data.title);
+      setPrompt(data.prompt ?? "");
+      setArtStyle(data.artStyle ?? "");
+      setAuthor(data.author ?? "Cristian Parada");
+      setSubtitlesEnabled(data.subtitlesEnabled ?? true);
+    }
     return data;
   }
 
   useEffect(() => {
-    load();
+    load(true);
   }, [id]);
 
   async function saveMeta() {
@@ -121,7 +124,7 @@ export default function ComicDetail() {
       body: JSON.stringify({ title: title.trim() || "Sin título", prompt, artStyle, author, subtitlesEnabled }),
     });
     setSavingMeta(false);
-    load();
+    load(true);
   }
 
   async function generate() {
@@ -393,6 +396,11 @@ export default function ComicDetail() {
             {comic.finalVideoUrl && (
               <div className={`mb-6 ${comic.aspectRatio === "vertical" ? "max-w-xs" : "max-w-xl"}`}>
                 <label className={labelClass}>Video final</label>
+                {comic.finalVideoOutdated && (
+                  <p className={`${noticeClass} mb-2`}>
+                    Hubo cambios después de la última mezcla. Este video está desactualizado: vuelve a mezclar.
+                  </p>
+                )}
                 <video controls preload="none" src={comic.finalVideoUrl} className="w-full rounded-md border border-gray-200" />
               </div>
             )}
@@ -424,11 +432,11 @@ export default function ComicDetail() {
                   <div className="flex flex-col gap-10">
                     {pageScenes.map((scene, i) => (
                       <SceneCard
-                        key={`${scene.id}-${refreshKey}`}
+                        key={scene.id}
                         scene={scene}
                         index={start + i}
                         aspectRatio={comic.aspectRatio}
-                        onDeleted={load}
+                        onChanged={() => load()}
                       />
                     ))}
                   </div>
@@ -465,17 +473,18 @@ function SceneCard({
   scene,
   index,
   aspectRatio,
-  onDeleted,
+  onChanged,
 }: {
   scene: Scene;
   index: number;
   aspectRatio: string;
-  onDeleted: () => void;
+  onChanged: () => void;
 }) {
   const [title, setTitle] = useState(scene.title ?? "");
   const [summary, setSummary] = useState(scene.summary ?? "");
   const [narration, setNarration] = useState(scene.narration ?? "");
   const [audioUrl, setAudioUrl] = useState(scene.audioUrl);
+  useEffect(() => setAudioUrl(scene.audioUrl), [scene.audioUrl]);
 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -493,6 +502,7 @@ function SceneCard({
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+    onChanged();
   }
 
   async function generateVoice() {
@@ -509,12 +519,13 @@ function SceneCard({
     setGenVoice(false);
     if (!res.ok) return setErr(data.error ?? "Error generando la voz");
     setAudioUrl(data.audioUrl);
+    onChanged();
   }
 
   async function remove() {
     if (!confirm("¿Eliminar esta escena?")) return;
     await fetch(`/api/scenes/${scene.id}`, { method: "DELETE" });
-    onDeleted();
+    onChanged();
   }
 
   return (
@@ -556,18 +567,28 @@ function SceneCard({
       {/* Los 2 paneles, lado a lado, mismo alto */}
       <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2">
         {scene.panels.map((panel) => (
-          <PanelCard key={panel.id} panel={panel} aspectRatio={aspectRatio} />
+          <PanelCard key={panel.id} panel={panel} aspectRatio={aspectRatio} onChanged={onChanged} />
         ))}
       </div>
     </article>
   );
 }
 
-function PanelCard({ panel, aspectRatio }: { panel: Panel; aspectRatio: string }) {
+function PanelCard({
+  panel,
+  aspectRatio,
+  onChanged,
+}: {
+  panel: Panel;
+  aspectRatio: string;
+  onChanged: () => void;
+}) {
   const [imagePrompt, setImagePrompt] = useState(panel.imagePrompt ?? "");
   const [imageUrl, setImageUrl] = useState(panel.imageUrl);
-  const [videoPrompt, setVideoPrompt] = useState(panel.videoPrompt ?? DEFAULT_VIDEO_PROMPT);
+  const [videoPrompt, setVideoPrompt] = useState(panel.videoPrompt || DEFAULT_VIDEO_PROMPT);
   const [videoUrl, setVideoUrl] = useState(panel.videoUrl);
+  useEffect(() => setImageUrl(panel.imageUrl), [panel.imageUrl]);
+  useEffect(() => setVideoUrl(panel.videoUrl), [panel.videoUrl]);
   const [videoDuration, setVideoDuration] = useState(5);
 
   const [saving, setSaving] = useState(false);
@@ -602,6 +623,8 @@ function PanelCard({ panel, aspectRatio }: { panel: Panel; aspectRatio: string }
     setGenImg(false);
     if (!res.ok) return setErr(data.error ?? "Error generando la imagen");
     setImageUrl(data.imageUrl);
+    setVideoUrl(data.videoUrl);
+    onChanged();
   }
 
   async function animate() {
@@ -621,6 +644,7 @@ function PanelCard({ panel, aspectRatio }: { panel: Panel; aspectRatio: string }
     setGenVideo(false);
     if (!res.ok) return setErr(data.error ?? "Error generando la animación");
     setVideoUrl(data.videoUrl);
+    onChanged();
   }
 
   return (

@@ -21,8 +21,20 @@ async function main() {
             summary: "La ciudad despierta vacía y en silencio.",
             narration:
               "Las calles todavía guardaban el frío de la noche. No había pasos, ni voces, solo el zumbido lejano de un semáforo cambiando de color para nadie.",
-            imagePrompt:
-              "Una avenida urbana desierta al amanecer, luz dorada rasante, niebla baja, fachadas de piedra, un único semáforo encendido, atmósfera melancólica y serena.",
+            panels: {
+              create: [
+                {
+                  order: 1,
+                  imagePrompt:
+                    "Una avenida urbana desierta al amanecer, luz dorada rasante, niebla baja, fachadas de piedra, un único semáforo encendido, atmósfera melancólica y serena.",
+                },
+                {
+                  order: 2,
+                  imagePrompt:
+                    "Primer plano de un semáforo solitario cambiando a verde entre la niebla del amanecer, gotas de rocío en el metal, luz dorada y tenue.",
+                },
+              ],
+            },
           },
         ],
       },

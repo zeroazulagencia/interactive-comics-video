@@ -90,7 +90,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const finalVideoUrl = `/generated/${filename}`;
     const updated = await prisma.comic.update({
       where: { id: comic.id },
-      data: { finalVideoUrl },
+      data: { finalVideoUrl, finalVideoOutdated: false },
       include: {
         scenes: {
           orderBy: { order: "asc" },

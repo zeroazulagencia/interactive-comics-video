@@ -82,9 +82,9 @@ Reglas:
 - Cada escena es breve: describe lo que SUCEDE, no un guion extenso.
 - "narration": locución/texto que narra el suceso, de 2 a 3 oraciones, evocador pero sin extenderse demasiado (el audio no debe superar ~12 segundos).
 - "imagePrompts": arreglo de EXACTAMENTE 2 prompts (en inglés), cada uno para UNA sola ilustración (no viñetas de cómic). Deben mostrar DOS MOMENTOS O ÁNGULOS DISTINTOS dentro de la misma escena (ej. un establishing shot y luego un close-up de la acción/emoción clave), para ayudar a entender mejor la historia que se narra — no repitas la misma composición. Describe composición, encuadre, luz, color, sujetos, ambiente y detalles en cada uno. Integra SIEMPRE el estilo indicado para mantener coherencia entre todas las escenas.
-- "videoPrompts": arreglo de EXACTAMENTE 2 prompts de animación (en inglés), uno para CADA imagePrompt. IMPORTANTE: NUNCA intentes animar personas o figuras (wan-video distorsiona horriblemente los rostros/cuerpos). Enfócate SOLO en: cámara (slow pan/tilt/push-in/zoom), elementos atmosféricos (polvo, humo, luz, sombras, partículas), objetos inanimados (papeles, cortinas, hojas, agua) y efectos de luz. Ejemplo: "soft slow push-in camera, dust motes floating in warm light, shadows deepening slowly across the room". NUNCA uses palabras como "person", "people", "character" en videoPrompts.
+- "videoPrompts": arreglo de EXACTAMENTE 2 prompts de animación (en inglés), uno para CADA imagePrompt. IMPORTANTE: NUNCA intentes animar personas o figuras (los modelos de video distorsionan los rostros/cuerpos). Enfócate SOLO en: cámara (slow pan/tilt/push-in/zoom), elementos atmosféricos (polvo, humo, luz, sombras, partículas), objetos inanimados (papeles, cortinas, hojas, agua) y efectos de luz. Ejemplo: "soft slow push-in camera, dust motes floating in warm light, shadows deepening slowly across the room". NUNCA uses palabras como "person", "people", "character" en videoPrompts.
 - "title": título corto de la escena.
-Responde SOLO JSON válido con la forma: {"scenes":[{"title","summary","narration","imagePrompts":["...","..."]}]}`;
+Responde SOLO JSON válido con la forma: {"scenes":[{"title":"...","summary":"...","narration":"...","imagePrompts":["...","..."],"videoPrompts":["...","..."]}]}`;
 
   const user = `IDEA / HISTORIA:\n${prompt}\n\nESTILO DE ILUSTRACIÓN (aplicar a todos los imagePrompt):\n${
     artStyle || "libre, coherente en todas las escenas"
@@ -109,12 +109,44 @@ Responde SOLO JSON válido con la forma: {"scenes":[{"title","summary","narratio
   }
 
   const content = await readStreamedContent(res);
-  const parsed = JSON.parse(content);
-  const scenes: GeneratedScene[] = parsed.scenes ?? parsed.escenas ?? [];
-  if (!Array.isArray(scenes) || scenes.length === 0) {
+  let parsed: { scenes?: unknown; escenas?: unknown };
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new Error("El modelo devolvió un JSON inválido.");
+  }
+  const raw = parsed.scenes ?? parsed.escenas;
+  const scenes = Array.isArray(raw) ? raw.map(normalizeScene).filter((s): s is GeneratedScene => s !== null) : [];
+  if (scenes.length === 0) {
     throw new Error("El modelo no devolvió escenas válidas.");
   }
   return scenes;
+}
+
+function str(v: unknown): string {
+  return typeof v === "string" ? v.trim() : "";
+}
+
+function pair(v: unknown): [string, string] {
+  const arr = Array.isArray(v) ? v : [];
+  return [str(arr[0]), str(arr[1])];
+}
+
+// Descarta escenas sin narración o sin los 2 prompts de imagen y completa
+// el resto de campos con strings seguros.
+function normalizeScene(s: unknown): GeneratedScene | null {
+  if (!s || typeof s !== "object") return null;
+  const o = s as Record<string, unknown>;
+  const narration = str(o.narration);
+  const imagePrompts = pair(o.imagePrompts);
+  if (!narration || !imagePrompts[0] || !imagePrompts[1]) return null;
+  return {
+    title: str(o.title),
+    summary: str(o.summary),
+    narration,
+    imagePrompts,
+    videoPrompts: pair(o.videoPrompts),
+  };
 }
 
 // Tamaños soportados por gpt-image-1 según la proporción del proyecto.

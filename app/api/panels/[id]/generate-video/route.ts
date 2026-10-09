@@ -50,10 +50,16 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     await writeFile(path.join(dir, filename), buffer);
 
     const videoUrl = `/generated/${filename}`;
-    const updated = await prisma.panel.update({
-      where: { id: panel.id },
-      data: { videoUrl },
-    });
+    const [updated] = await prisma.$transaction([
+      prisma.panel.update({
+        where: { id: panel.id },
+        data: { videoUrl },
+      }),
+      prisma.comic.update({
+        where: { id: panel.scene.comicId },
+        data: { finalVideoOutdated: true },
+      }),
+    ]);
     return NextResponse.json(updated);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error generando el video";

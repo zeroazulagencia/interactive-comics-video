@@ -11,8 +11,17 @@ export function middleware(req: NextRequest) {
   const auth = req.headers.get("authorization");
 
   if (auth?.startsWith("Basic ")) {
-    const [user, pass] = atob(auth.slice(6)).split(":");
-    if (user === username && pass === password) {
+    let decoded = "";
+    try {
+      decoded = atob(auth.slice(6));
+    } catch {
+      // cabecera mal formada: se trata como credenciales inválidas
+    }
+    // Solo el primer ":" separa usuario y contraseña; la contraseña puede contener ":".
+    const sep = decoded.indexOf(":");
+    const user = sep >= 0 ? decoded.slice(0, sep) : "";
+    const pass = sep >= 0 ? decoded.slice(sep + 1) : "";
+    if (sep >= 0 && user === username && pass === password) {
       return NextResponse.next();
     }
   }

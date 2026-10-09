@@ -31,6 +31,17 @@ export async function PATCH(
   for (const k of ["title", "prompt", "artStyle", "published", "author", "subtitlesEnabled"]) {
     if (k in body) data[k] = body[k];
   }
+
+  const current = await prisma.comic.findUnique({ where: { id: params.id } });
+  if (!current) {
+    return NextResponse.json({ error: "No encontrado" }, { status: 404 });
+  }
+  // Campos que aparecen en el video final (tarjetas de título y subtítulos).
+  const affectsVideo = (["title", "author", "subtitlesEnabled"] as const).some(
+    (k) => k in data && data[k] !== current[k]
+  );
+  if (affectsVideo) data.finalVideoOutdated = true;
+
   const comic = await prisma.comic.update({
     where: { id: params.id },
     data,

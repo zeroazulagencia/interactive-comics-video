@@ -35,10 +35,16 @@ export async function POST(
     await writeFile(path.join(dir, filename), buffer);
 
     const audioUrl = `/generated/${filename}`;
-    const updated = await prisma.scene.update({
-      where: { id: scene.id },
-      data: { audioUrl },
-    });
+    const [updated] = await prisma.$transaction([
+      prisma.scene.update({
+        where: { id: scene.id },
+        data: { audioUrl },
+      }),
+      prisma.comic.update({
+        where: { id: scene.comicId },
+        data: { finalVideoOutdated: true },
+      }),
+    ]);
     return NextResponse.json(updated);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error generando la voz";

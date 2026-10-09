@@ -23,29 +23,31 @@ export async function POST(
   try {
     const scenes = await generateScenes(comic.prompt, comic.artStyle ?? "");
 
-    // Reemplaza las escenas anteriores
-    await prisma.scene.deleteMany({ where: { comicId: comic.id } });
-    await prisma.$transaction(
-      scenes.map((s, i) => {
-        const [p1, p2] = s.imagePrompts ?? [];
-        const [v1, v2] = s.videoPrompts ?? [];
+    // Reemplaza las escenas anteriores en una sola transacción: si algo falla,
+    // se conservan las existentes.
+    await prisma.$transaction([
+      prisma.scene.deleteMany({ where: { comicId: comic.id } }),
+      ...scenes.map((s, i) => {
+        const [p1, p2] = s.imagePrompts;
+        const [v1, v2] = s.videoPrompts;
         return prisma.scene.create({
           data: {
             comicId: comic.id,
             order: i + 1,
-            title: s.title ?? `Escena ${i + 1}`,
-            summary: s.summary ?? "",
-            narration: s.narration ?? "",
+            title: s.title || `Escena ${i + 1}`,
+            summary: s.summary,
+            narration: s.narration,
             panels: {
               create: [
-                { order: 1, imagePrompt: p1 ?? "", videoPrompt: v1 ?? "" },
-                { order: 2, imagePrompt: p2 ?? "", videoPrompt: v2 ?? "" },
+                { order: 1, imagePrompt: p1, videoPrompt: v1 },
+                { order: 2, imagePrompt: p2, videoPrompt: v2 },
               ],
             },
           },
         });
-      })
-    );
+      }),
+      prisma.comic.update({ where: { id: comic.id }, data: { finalVideoOutdated: true } }),
+    ]);
 
     const updated = await prisma.comic.findUnique({
       where: { id: comic.id },

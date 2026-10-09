@@ -35,10 +35,16 @@ export async function POST(
     await writeFile(path.join(dir, filename), Buffer.from(b64, "base64"));
 
     const imageUrl = `/generated/${filename}`;
-    const updated = await prisma.panel.update({
-      where: { id: panel.id },
-      data: { imageUrl },
-    });
+    const [updated] = await prisma.$transaction([
+      prisma.panel.update({
+        where: { id: panel.id },
+        data: { imageUrl, videoUrl: null },
+      }),
+      prisma.comic.update({
+        where: { id: panel.scene.comicId },
+        data: { finalVideoOutdated: true },
+      }),
+    ]);
     return NextResponse.json(updated);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error generando la imagen";

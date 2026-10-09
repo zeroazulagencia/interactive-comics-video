@@ -33,23 +33,25 @@ type Prediction = {
   urls: { get: string };
 };
 
-// Crea una predicción fijada a una versión (modelos comunitarios) y espera a que
-// termine (polling), para modelos que tardan más de lo que el header
-// "Prefer: wait" puede bloquear de forma síncrona.
-async function runVersionAndPoll(
-  version: string,
-  input: Record<string, unknown>,
+// Crea una predicción y espera a que termine (polling). "Prefer: wait" bloquea
+// como máximo 60s; si el modelo tarda más, la respuesta llega en "processing"
+// y se sigue consultando hasta que termine o se agote maxWaitMs.
+async function createAndPoll(
+  url: string,
+  body: Record<string, unknown>,
+  label: string,
   { pollMs = 3000, maxWaitMs = 5 * 60 * 1000 } = {}
 ): Promise<unknown> {
   let res: Response;
   try {
-    res = await fetch(`${API}/predictions`, {
+    res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token()}`,
+        Prefer: "wait",
       },
-      body: JSON.stringify({ version, input }),
+      body: JSON.stringify(body),
     });
   } catch (e) {
     const cause =
@@ -62,13 +64,13 @@ async function runVersionAndPoll(
 
   let data: Prediction = await res.json();
   if (!res.ok) {
-    throw new Error(`Replicate (${version}) ${res.status}: ${JSON.stringify(data)}`);
+    throw new Error(`Replicate (${label}) ${res.status}: ${JSON.stringify(data)}`);
   }
 
   const start = Date.now();
   while (data.status !== "succeeded" && data.status !== "failed" && data.status !== "canceled") {
     if (Date.now() - start > maxWaitMs) {
-      throw new Error(`Replicate (${version}) no terminó a tiempo (status: ${data.status}).`);
+      throw new Error(`Replicate (${label}) no terminó a tiempo (status: ${data.status}).`);
     }
     await new Promise((r) => setTimeout(r, pollMs));
     const poll = await fetch(data.urls.get, {
@@ -78,50 +80,46 @@ async function runVersionAndPoll(
   }
 
   if (data.status !== "succeeded" || !data.output) {
-    throw new Error(`Replicate (${version}) ${data.status}: ${data.error ?? "sin salida"}`);
+    throw new Error(`Replicate (${label}) ${data.status}: ${data.error ?? "sin salida"}`);
   }
   return data.output;
 }
 
+// Modelos comunitarios: requieren fijar la versión y usar POST /v1/predictions.
+function runVersionAndPoll(
+  version: string,
+  input: Record<string, unknown>,
+  opts?: { pollMs?: number; maxWaitMs?: number }
+): Promise<unknown> {
+  return createAndPoll(`${API}/predictions`, { version, input }, version, opts);
+}
+
+// Modelos oficiales: atajo /models/{owner}/{name}/predictions.
+function runModelAndPoll(
+  model: string,
+  input: Record<string, unknown>,
+  opts?: { pollMs?: number; maxWaitMs?: number }
+): Promise<unknown> {
+  return createAndPoll(`${API}/models/${model}/predictions`, { input }, model, opts);
+}
+
 // Genera narración a partir de texto y devuelve la URL temporal del audio (mp3).
 export async function generateVoice(text: string): Promise<string> {
-  let res: Response;
-  try {
-    res = await fetch(`${API}/models/${MODEL}/predictions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token()}`,
-        Prefer: "wait",
-      },
-      body: JSON.stringify({
-        input: {
-          text,
-          voice_id: VOICE_ID,
-          language_boost: "Spanish",
-          emotion: "neutral",
-          speed: 1.15,
-          audio_format: "mp3",
-        },
-      }),
-    });
-  } catch (e) {
-    const cause =
-      e instanceof Error && e.cause
-        ? ` (causa: ${String((e.cause as { message?: string })?.message ?? e.cause)})`
-        : "";
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`No se pudo conectar con Replicate: ${msg}${cause}`);
-  }
-
-  const data = await res.json();
-  if (!res.ok || data.error) {
-    throw new Error(`Replicate (${MODEL}) ${res.status}: ${data.error ?? JSON.stringify(data)}`);
-  }
-  if (data.status !== "succeeded" || !data.output) {
-    throw new Error(`Replicate no devolvió audio (status: ${data.status}).`);
-  }
-  return data.output as string;
+  const output = await runModelAndPoll(
+    MODEL,
+    {
+      text,
+      voice_id: VOICE_ID,
+      language_boost: "Spanish",
+      emotion: "neutral",
+      speed: 1.15,
+      audio_format: "mp3",
+    },
+    { maxWaitMs: 100 * 1000 }
+  );
+  const url = Array.isArray(output) ? output[0] : output;
+  if (typeof url !== "string") throw new Error("Replicate no devolvió audio válido.");
+  return url;
 }
 
 export type VideoAspectRatio = "16:9" | "9:16";
@@ -135,44 +133,20 @@ export async function generateVideo(
   duration: number,
   aspectRatio: VideoAspectRatio = "16:9"
 ): Promise<string> {
-  let res: Response;
-  try {
-    res = await fetch(`${API}/models/${VIDEO_MODEL}/predictions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token()}`,
-        Prefer: "wait",
-      },
-      body: JSON.stringify({
-        input: {
-          image: imageDataUri,
-          prompt,
-          duration: Math.max(1, Math.min(20, Math.round(duration))),
-          fps: 24,
-          resolution: "720p",
-          disable_safety_filter: true,
-          prompt_upsampling: true,
-        },
-      }),
-    });
-  } catch (e) {
-    const cause =
-      e instanceof Error && e.cause
-        ? ` (causa: ${String((e.cause as { message?: string })?.message ?? e.cause)})`
-        : "";
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`No se pudo conectar con Replicate: ${msg}${cause}`);
-  }
-
-  const data = await res.json();
-  if (!res.ok || data.error) {
-    throw new Error(`Replicate (${VIDEO_MODEL}) ${res.status}: ${data.error ?? JSON.stringify(data)}`);
-  }
-  if (data.status !== "succeeded" || !data.output) {
-    throw new Error(`Replicate (${VIDEO_MODEL}) no devolvió video (status: ${data.status}).`);
-  }
-  const url = Array.isArray(data.output) ? data.output[0] : data.output;
+  const output = await runModelAndPoll(
+    VIDEO_MODEL,
+    {
+      image: imageDataUri,
+      prompt,
+      duration: Math.max(1, Math.min(20, Math.round(duration))),
+      fps: 24,
+      resolution: "720p",
+      disable_safety_filter: true,
+      prompt_upsampling: true,
+    },
+    { maxWaitMs: 270 * 1000 }
+  );
+  const url = Array.isArray(output) ? output[0] : output;
   if (typeof url !== "string") throw new Error("Replicate no devolvió un video válido.");
   return url;
 }

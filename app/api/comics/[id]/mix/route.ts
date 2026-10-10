@@ -4,6 +4,7 @@ import path from "path";
 import { prisma } from "@/lib/prisma";
 import { mixComic } from "@/lib/ffmpeg";
 import { generateMusic } from "@/lib/replicate";
+import { splitSentences } from "@/lib/comic";
 
 export const maxDuration = 300;
 
@@ -56,12 +57,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     // Divide cada narración en frases (oraciones) para subtítulos secuenciales
     const subtitleChunks = comic.scenes.map((s) => {
-      const text = s.narration || "";
-      if (!text) return [""];
-      return text
-        .split(/(?<=[.!?])\s+/)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
+      const sentences = splitSentences(s.narration || "");
+      return sentences.length > 0 ? sentences : [""];
     });
 
     // Música de fondo acorde a la historia.

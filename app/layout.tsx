@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Interactive Comics — Editorial",
+  title: "Interactive Comics — Estudio",
   description: "Comics interactivos",
 };
 
@@ -13,7 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es">
-      <body className="min-h-screen bg-gray-50 text-gray-900 antialiased">{children}</body>
+      <body className="min-h-screen bg-canvas font-sans text-ink antialiased">{children}</body>
     </html>
   );
 }

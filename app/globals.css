@@ -1,1 +1,32 @@
 @import "tailwindcss";
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --color-ink: #1d1d1f;
+  --color-ink-2: #6e6e73;
+  --color-ink-3: #86868b;
+  --color-canvas: #f5f5f7;
+  --color-accent: #0071e3;
+  --color-accent-hover: #0077ed;
+}
+
+@keyframes sheet-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.97) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes kenburns {
+  from { transform: scale(1); }
+  to { transform: scale(1.08); }
+}
+
+.animate-sheet-in { animation: sheet-in 0.36s cubic-bezier(0.32, 0.72, 0, 1); }
+.animate-fade-in { animation: fade-in 0.2s ease-out; }
+.animate-pop-in { animation: pop-in 0.28s cubic-bezier(0.32, 0.72, 0, 1); }

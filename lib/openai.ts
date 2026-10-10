@@ -7,8 +7,8 @@ export const TEXT_MODEL = process.env.OPENAI_TEXT_MODEL ?? "gpt-5.5";
 export const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1";
 
 function key(): string {
-  const k = process.env.OPENAI_API_KEY;
-  if (!k) throw new Error("Falta OPENAI_API_KEY en .env");
+  const k = process.env.OPENAI_APIKEY;
+  if (!k) throw new Error("Falta OPENAI_APIKEY en .env");
   return k;
 }
 

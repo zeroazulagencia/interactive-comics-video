@@ -35,4 +35,4 @@ npm run dev           # http://localhost:3000
 
 ## Variables de entorno
 
-Ver `.env.example`. El `.env` incluye `OPENAI_API_KEY` y `DATABASE_URL`.
+Ver `.env.example`. El `.env` incluye `OPENAI_APIKEY` y `DATABASE_URL`.

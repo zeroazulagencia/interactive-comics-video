@@ -21,8 +21,8 @@ export const VIDEO_FRAME_OPTIONS = [17, 33, 49, 65, 81] as const;
 export type VideoFrames = (typeof VIDEO_FRAME_OPTIONS)[number];
 
 function token(): string {
-  const t = process.env.REPLICATE_API_TOKEN;
-  if (!t) throw new Error("Falta REPLICATE_API_TOKEN en .env");
+  const t = process.env.REPLICATE_APIKEY;
+  if (!t) throw new Error("Falta REPLICATE_APIKEY en .env");
   return t;
 }
 

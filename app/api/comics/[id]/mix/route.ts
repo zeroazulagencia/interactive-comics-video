@@ -3,7 +3,8 @@ import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { prisma } from "@/lib/prisma";
 import { mixComic } from "@/lib/ffmpeg";
-import { generateMusic } from "@/lib/replicate";
+import { generateMusic, MUSIC_MODEL } from "@/lib/replicate";
+import { recordCost } from "@/lib/costs";
 import { musicPromptFor, splitSentences } from "@/lib/comic";
 
 export const maxDuration = 300;
@@ -62,7 +63,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     });
 
     // Música de fondo acorde a la historia.
-    const musicSourceUrl = await generateMusic(musicPromptFor(comic), MUSIC_SECONDS);
+    const { url: musicSourceUrl, costUsd } = await generateMusic(musicPromptFor(comic), MUSIC_SECONDS);
+    await recordCost({ comicId: comic.id, kind: "musica", provider: "replicate", model: MUSIC_MODEL, amountUsd: costUsd });
     const musicRes = await fetch(musicSourceUrl);
     if (!musicRes.ok) throw new Error("No se pudo descargar la música generada.");
     const musicBuffer = Buffer.from(await musicRes.arrayBuffer());

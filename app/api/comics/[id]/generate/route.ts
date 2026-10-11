@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { generateScenes } from "@/lib/openai";
+import { generateScenes, TEXT_MODEL } from "@/lib/openai";
+import { recordCost } from "@/lib/costs";
 
 export const maxDuration = 120;
 
@@ -21,7 +22,12 @@ export async function POST(
   }
 
   try {
-    const { scenes, musicPrompt } = await generateScenes(comic.prompt, comic.artStyle ?? "");
+    const { scenes, musicPrompt, costUsd } = await generateScenes(
+      comic.prompt,
+      comic.artStyle ?? "",
+      comic.motionStyle ?? ""
+    );
+    await recordCost({ comicId: comic.id, kind: "guion", provider: "openai", model: TEXT_MODEL, amountUsd: costUsd });
 
     // Reemplaza las escenas anteriores en una sola transacción: si algo falla,
     // se conservan las existentes.

@@ -96,7 +96,7 @@ export function ProductionStep({
         )}
       </Card>
 
-      <Card className="divide-y divide-black/[0.06]">
+      <Card className="divide-y divide-white/[0.06]">
         {rows.map((r) => {
           const running = batch?.kind === r.kind;
           const complete = r.total > 0 && r.done === r.total;
@@ -130,7 +130,7 @@ export function ProductionStep({
 
       {errors.length > 0 && (
         <Card className="p-6">
-          <h3 className="mb-3 text-[15px] font-semibold text-red-600">
+          <h3 className="mb-3 text-[15px] font-semibold text-red-400">
             {errors.length} {errors.length === 1 ? "tarea falló" : "tareas fallaron"}
           </h3>
           <ul className="flex flex-col gap-2">

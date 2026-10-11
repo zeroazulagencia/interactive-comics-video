@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { prisma } from "@/lib/prisma";
-import { generateVideo } from "@/lib/replicate";
+import { generateVideo, VIDEO_MODEL } from "@/lib/replicate";
+import { recordCost } from "@/lib/costs";
 
 export const maxDuration = 300;
 
@@ -31,6 +32,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const body = await req.json().catch(() => ({}));
   const duration = Math.max(1, Math.min(20, body.duration ?? 5));
   const aspectRatio = panel.scene.comic.aspectRatio === "vertical" ? "9:16" : "16:9";
+  const motionStyle = panel.scene.comic.motionStyle?.trim();
+  const prompt = motionStyle ? `${panel.videoPrompt}. Animation style: ${motionStyle}` : panel.videoPrompt;
 
   try {
     const imagePath = path.join(process.cwd(), "public", panel.imageUrl);
@@ -38,7 +41,14 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const mime = panel.imageUrl.endsWith(".png") ? "image/png" : "image/jpeg";
     const imageDataUri = `data:${mime};base64,${imageBuffer.toString("base64")}`;
 
-    const videoSourceUrl = await generateVideo(imageDataUri, panel.videoPrompt, duration, aspectRatio);
+    const { url: videoSourceUrl, costUsd } = await generateVideo(imageDataUri, prompt, duration, aspectRatio);
+    await recordCost({
+      comicId: panel.scene.comicId,
+      kind: "animacion",
+      provider: "replicate",
+      model: VIDEO_MODEL,
+      amountUsd: costUsd,
+    });
 
     const videoRes = await fetch(videoSourceUrl);
     if (!videoRes.ok) throw new Error("No se pudo descargar el video generado.");

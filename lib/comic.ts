@@ -26,6 +26,7 @@ export type Comic = {
   subtitlesEnabled: boolean;
   prompt: string | null;
   artStyle: string | null;
+  motionStyle: string | null;
   aspectRatio: string;
   finalVideoUrl: string | null;
   finalVideoOutdated: boolean;
@@ -48,7 +49,46 @@ export type ComicSummary = {
   coverImage: string | null;
   done: number;
   total: number;
+  costUsd: number; // gasto registrado en APIs para este proyecto
 };
+
+// Saldo estimado de un proveedor: saldo ingresado menos lo gastado desde entonces.
+export type ProviderBalance = {
+  provider: "openai" | "replicate";
+  amountUsd: number | null; // null si no se ha ingresado saldo
+  setAt: string | null;
+  spentSinceUsd: number;
+  remainingUsd: number | null;
+  avgPerVideoUsd: number | null; // gasto promedio de este proveedor por video terminado
+};
+
+// Resumen que devuelve GET /api/costs para la página de inicio.
+export type CostSummary = {
+  videoCount: number; // proyectos con video final y costos registrados
+  avgPerVideoUsd: number | null;
+  totalSpentUsd: number;
+  providers: ProviderBalance[];
+  videosLeft: number | null; // videos que alcanzan con el saldo estimado
+};
+
+// Desglose de costos de un proyecto (GET /api/comics/:id/costs).
+export type CostBreakdown = {
+  totalUsd: number;
+  byKind: { kind: string; amountUsd: number; count: number }[];
+};
+
+export const COST_KIND_LABELS: Record<string, string> = {
+  guion: "Guion",
+  voz: "Voces",
+  ilustracion: "Ilustraciones",
+  animacion: "Animaciones",
+  musica: "Música",
+  youtube: "Texto YouTube",
+};
+
+export function formatUsd(n: number): string {
+  return `US$ ${n.toFixed(2)}`;
+}
 
 export const DEFAULT_AUTHOR = "Cristian Parada";
 

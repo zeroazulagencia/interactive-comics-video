@@ -84,7 +84,7 @@ export function SceneEditor({
 
   return (
     <div className="flex flex-col gap-6">
-      <section className="rounded-3xl bg-white p-6">
+      <section className="rounded-2xl bg-surface p-6 ring-1 ring-white/[0.07]">
         <div className="mb-4 flex items-center justify-between">
           <span className="text-[12px] font-semibold uppercase tracking-[0.08em] text-ink-3">Texto</span>
           <SaveIndicator state={saveState} />
@@ -105,10 +105,10 @@ export function SceneEditor({
           onBlur={() => saveIfChanged("narration", narration)}
         />
         {scene.audioUrl && narration !== (scene.narration ?? "") && (
-          <p className="mt-2 text-[12px] text-amber-700">Al guardar el nuevo texto, la voz actual se descarta.</p>
+          <p className="mt-2 text-[12px] text-orange-300">Al guardar el nuevo texto, la voz actual se descarta.</p>
         )}
 
-        <div className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl bg-canvas p-3">
+        <div className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl bg-surface-2 p-3">
           <Button
             variant={scene.audioUrl ? "secondary" : "primary"}
             size="sm"
@@ -141,7 +141,7 @@ export function SceneEditor({
         />
       ))}
 
-      <button onClick={remove} className="self-center pb-4 text-[13px] text-red-600 hover:underline">
+      <button onClick={remove} className="self-center pb-4 text-[13px] text-red-400 hover:underline">
         Eliminar escena
       </button>
     </div>
@@ -211,8 +211,8 @@ function PanelEditor({
   const working = genImg || genVideo || busy;
 
   return (
-    <section className="overflow-hidden rounded-3xl bg-white">
-      <div className={`${aspectRatio === "vertical" ? "mx-auto aspect-[9/16] max-h-[520px]" : "aspect-video"} relative bg-black/[0.04]`}>
+    <section className="overflow-hidden rounded-2xl bg-surface ring-1 ring-white/[0.07]">
+      <div className={`${aspectRatio === "vertical" ? "mx-auto aspect-[9/16] max-h-[520px]" : "aspect-video"} relative bg-white/[0.04]`}>
         {panel.videoUrl ? (
           <video
             controls
@@ -228,8 +228,8 @@ function PanelEditor({
           <div className="flex h-full items-center justify-center text-[13px] text-ink-3">Sin ilustración todavía</div>
         )}
         {working && (
-          <div className="animate-fade-in absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-sm">
-            <span className="flex items-center gap-2 rounded-full bg-white px-4 py-2 text-[13px] font-medium shadow-sm">
+          <div className="animate-fade-in absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <span className="flex items-center gap-2 rounded-full bg-surface px-4 py-2 text-[13px] font-medium shadow-sm">
               <Spinner />
               {genVideo ? "Animando (1–2 min)…" : genImg ? "Ilustrando…" : "En cola de producción…"}
             </span>

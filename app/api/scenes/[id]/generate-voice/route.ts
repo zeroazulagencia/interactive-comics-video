@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { prisma } from "@/lib/prisma";
-import { generateVoice } from "@/lib/replicate";
+import { generateVoice, MODEL as VOICE_MODEL } from "@/lib/replicate";
+import { recordCost } from "@/lib/costs";
 
 export const maxDuration = 120;
 
@@ -23,7 +24,14 @@ export async function POST(
   }
 
   try {
-    const audioSourceUrl = await generateVoice(scene.narration);
+    const { url: audioSourceUrl, costUsd } = await generateVoice(scene.narration);
+    await recordCost({
+      comicId: scene.comicId,
+      kind: "voz",
+      provider: "replicate",
+      model: VOICE_MODEL,
+      amountUsd: costUsd,
+    });
 
     const audioRes = await fetch(audioSourceUrl);
     if (!audioRes.ok) throw new Error("No se pudo descargar el audio generado.");

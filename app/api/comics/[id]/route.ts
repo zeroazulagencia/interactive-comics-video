@@ -32,6 +32,7 @@ export async function PATCH(
     "title",
     "prompt",
     "artStyle",
+    "motionStyle",
     "published",
     "author",
     "subtitlesEnabled",

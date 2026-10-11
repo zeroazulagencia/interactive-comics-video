@@ -17,6 +17,7 @@ model Comic {
   subtitlesEnabled Boolean @default(true) // subtítulos activados/desactivados
   prompt        String? // idea/historia inicial
   artStyle      String? // estilo de ilustración (se aplica a todas las escenas)
+  motionStyle   String? // tipo de animación (se añade al prompt de cada clip)
   aspectRatio   String   @default("horizontal") // "horizontal" (16:9, YouTube) | "vertical" (9:16, Instagram/Reels)
   coverImage    String?
   published     Boolean  @default(false)
@@ -27,8 +28,33 @@ model Comic {
   youtubeDescription String? // descripción para YouTube
   youtubeTags        String? // etiquetas separadas por comas
   scenes        Scene[]
+  costs         Cost[]
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+// Costo de cada llamada a OpenAI/Replicate. Se conserva aunque se borre el
+// proyecto (comicId queda en null) para descontarlo del saldo.
+model Cost {
+  id        String   @id @default(cuid())
+  comic     Comic?   @relation(fields: [comicId], references: [id], onDelete: SetNull)
+  comicId   String?
+  kind      String // guion | voz | ilustracion | animacion | musica | youtube
+  provider  String // openai | replicate
+  model     String
+  amountUsd Float
+  createdAt DateTime @default(now())
+
+  @@index([comicId])
+  @@index([provider, createdAt])
+}
+
+// Saldo ingresado a mano por proveedor; el saldo estimado descuenta los
+// costos registrados desde setAt.
+model ApiBalance {
+  provider  String   @id // openai | replicate
+  amountUsd Float
+  setAt     DateTime @default(now())
 }
 
 model Scene {

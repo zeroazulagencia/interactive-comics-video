@@ -17,6 +17,8 @@ export async function GET() {
       },
       orderBy: { updatedAt: "desc" },
     });
+    const costs = await prisma.cost.groupBy({ by: ["comicId"], _sum: { amountUsd: true } });
+    const costOf = (id: string) => costs.find((r) => r.comicId === id)?._sum.amountUsd ?? 0;
     const summaries: ComicSummary[] = comics.map((c) => {
       const panels = c.scenes.flatMap((s) => s.panels);
       return {
@@ -33,6 +35,7 @@ export async function GET() {
           panels.filter((p) => p.imageUrl).length +
           panels.filter((p) => p.videoUrl).length,
         total: c.scenes.length + panels.length * 2,
+        costUsd: costOf(c.id),
       };
     });
     return NextResponse.json(summaries);

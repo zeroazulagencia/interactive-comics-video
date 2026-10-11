@@ -26,7 +26,7 @@ export function StoryboardStep({
   if (comic.scenes.length === 0) {
     return (
       <div className="mx-auto flex max-w-md flex-col items-center gap-4 py-24 text-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/10 text-2xl text-accent">✦</span>
+        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/10 text-2xl text-accent ring-1 ring-accent/20">✦</span>
         <h2 className="text-2xl font-semibold tracking-tight">Todavía no hay escenas</h2>
         <p className="text-ink-2">Escribe la historia y elige un estilo; el estudio crea el storyboard por ti.</p>
         <Button variant="primary" size="lg" onClick={onGoToIdea}>
@@ -124,13 +124,13 @@ function SceneTile({
   return (
     <button
       onClick={onClick}
-      className="group overflow-hidden rounded-3xl bg-white text-left shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_28px_rgba(0,0,0,0.05)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_2px_4px_rgba(0,0,0,0.04),0_18px_40px_rgba(0,0,0,0.10)] focus:outline-none focus-visible:ring-4 focus-visible:ring-accent/30"
+      className="group overflow-hidden rounded-2xl bg-surface text-left ring-1 ring-white/[0.07] transition duration-300 hover:-translate-y-1 hover:ring-white/[0.16] hover:shadow-[0_30px_60px_-30px_rgba(0,0,0,0.9)] focus:outline-none focus-visible:ring-4 focus-visible:ring-accent/30"
     >
-      <div className="relative grid grid-cols-2 gap-px bg-black/[0.06]">
+      <div className="relative grid grid-cols-2 gap-px bg-white/[0.06]">
         {[0, 1].map((k) => {
           const panel = scene.panels[k];
           return (
-            <div key={k} className={`${vertical ? "aspect-[9/16]" : "aspect-video"} overflow-hidden bg-[#f0f0f3]`}>
+            <div key={k} className={`${vertical ? "aspect-[9/16]" : "aspect-video"} overflow-hidden bg-surface-2`}>
               {panel?.imageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -145,7 +145,7 @@ function SceneTile({
             </div>
           );
         })}
-        <span className="absolute left-3 top-3 rounded-full bg-white/85 px-2.5 py-1 text-[11px] font-semibold tabular-nums backdrop-blur-md">
+        <span className="absolute left-3 top-3 rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-semibold tabular-nums backdrop-blur-md">
           {String(index + 1).padStart(2, "0")}
         </span>
         {working && (

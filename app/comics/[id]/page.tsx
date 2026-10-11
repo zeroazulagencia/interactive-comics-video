@@ -4,13 +4,20 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, comicProgress, DEFAULT_VIDEO_PROMPT, type Comic, type Panel } from "@/lib/comic";
-import { Badge, SegmentedControl } from "@/components/ui";
+import { Badge, Logo, ProgressBar } from "@/components/ui";
 import { IdeaStep, type IdeaForm } from "@/components/studio/IdeaStep";
 import { StoryboardStep } from "@/components/studio/StoryboardStep";
 import { ProductionStep, type Batch, type BatchError, type TaskKind } from "@/components/studio/ProductionStep";
 import { PreviewStep } from "@/components/studio/PreviewStep";
 
 type Step = "idea" | "storyboard" | "production" | "preview";
+
+const STEPS: { value: Step; label: string }[] = [
+  { value: "idea", label: "Idea" },
+  { value: "storyboard", label: "Storyboard" },
+  { value: "production", label: "Producción" },
+  { value: "preview", label: "Vista previa" },
+];
 
 function initialStep(c: Comic): Step {
   if (c.scenes.length === 0) return "idea";
@@ -22,6 +29,7 @@ function formFrom(c: Comic): IdeaForm {
     title: c.title,
     prompt: c.prompt ?? "",
     artStyle: c.artStyle ?? "",
+    motionStyle: c.motionStyle ?? "",
   };
 }
 
@@ -264,30 +272,54 @@ export default function ComicStudio() {
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-40 border-b border-black/[0.06] bg-white/70 backdrop-blur-xl backdrop-saturate-150">
+      <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-canvas/75 backdrop-blur-xl backdrop-saturate-150">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-3 px-6 py-3">
           <div className="flex min-w-0 flex-1 items-center gap-3">
-            <Link href="/" className="shrink-0 text-[13px] text-accent hover:underline">
-              ‹ Proyectos
+            <Link href="/" className="shrink-0" aria-label="Volver a los proyectos">
+              <Logo size="sm" withName={false} />
             </Link>
-            <span className="truncate text-[15px] font-semibold">{comic.title}</span>
+            <span className="text-ink-3">/</span>
+            <Link href="/" className="shrink-0 text-[13px] text-ink-2 hover:text-ink">
+              Proyectos
+            </Link>
+            <span className="text-ink-3">/</span>
+            <span className="truncate text-[14px] font-semibold">{comic.title}</span>
           </div>
 
-          <SegmentedControl<Step>
-            value={step}
-            onChange={setStep}
-            options={[
-              { value: "idea", label: "Idea" },
-              { value: "storyboard", label: "Storyboard", disabled: !hasScenes },
-              { value: "production", label: "Producción", disabled: !hasScenes },
-              { value: "preview", label: "Vista previa", disabled: !hasScenes },
-            ]}
-          />
+          <nav className="flex items-center gap-1 rounded-full bg-white/[0.04] p-1 ring-1 ring-inset ring-white/[0.06]">
+            {STEPS.map((st, i) => {
+              const disabled = st.value !== "idea" && !hasScenes;
+              const active = step === st.value;
+              return (
+                <button
+                  key={st.value}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => setStep(st.value)}
+                  className={`flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-3.5 text-[13px] font-medium transition disabled:opacity-35 ${
+                    active ? "bg-white/[0.1] text-ink" : "text-ink-2 hover:text-ink"
+                  }`}
+                >
+                  <span
+                    className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-semibold tabular-nums ${
+                      active ? "bg-accent text-on-accent" : "bg-white/[0.08] text-ink-2"
+                    }`}
+                  >
+                    {i + 1}
+                  </span>
+                  {st.label}
+                </button>
+              );
+            })}
+          </nav>
 
           <div className="flex flex-1 items-center justify-end gap-3">
             {hasScenes && (
-              <span className="hidden text-[12px] tabular-nums text-ink-2 md:inline">
-                {progress.done}/{progress.total} listos
+              <span className="hidden items-center gap-2.5 md:flex">
+                <ProgressBar value={progress.done} total={progress.total} className="w-20" />
+                <span className="text-[12px] tabular-nums text-ink-2">
+                  {progress.done}/{progress.total}
+                </span>
               </span>
             )}
             {batch && step !== "production" && (

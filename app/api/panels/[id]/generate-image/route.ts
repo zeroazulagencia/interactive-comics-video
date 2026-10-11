@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { prisma } from "@/lib/prisma";
-import { generateImage, imageSizeFor } from "@/lib/openai";
+import { generateImage, imageSizeFor, IMAGE_MODEL } from "@/lib/openai";
+import { recordCost } from "@/lib/costs";
 
 export const maxDuration = 120;
 
@@ -27,7 +28,14 @@ export async function POST(
 
   try {
     const size = imageSizeFor(panel.scene.comic.aspectRatio);
-    const b64 = await generateImage(panel.imagePrompt, size);
+    const { b64, costUsd } = await generateImage(panel.imagePrompt, size);
+    await recordCost({
+      comicId: panel.scene.comicId,
+      kind: "ilustracion",
+      provider: "openai",
+      model: IMAGE_MODEL,
+      amountUsd: costUsd,
+    });
 
     const dir = path.join(process.cwd(), "public", "generated");
     await mkdir(dir, { recursive: true });

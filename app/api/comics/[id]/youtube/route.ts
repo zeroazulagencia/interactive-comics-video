@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { generateYoutubeMeta } from "@/lib/openai";
+import { generateYoutubeMeta, TEXT_MODEL } from "@/lib/openai";
+import { recordCost } from "@/lib/costs";
 
 export const maxDuration = 120;
 
@@ -25,6 +26,13 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       prompt: comic.prompt ?? "",
       narrations,
       vertical: comic.aspectRatio === "vertical",
+    });
+    await recordCost({
+      comicId: comic.id,
+      kind: "youtube",
+      provider: "openai",
+      model: TEXT_MODEL,
+      amountUsd: meta.costUsd,
     });
     const updated = await prisma.comic.update({
       where: { id: comic.id },

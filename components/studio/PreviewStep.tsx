@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import {
   api,
   comicProgress,
+  formatUsd,
   musicPromptFor,
+  COST_KIND_LABELS,
+  type CostBreakdown,
   splitSentences,
   DEFAULT_AUTHOR,
   DEFAULT_VIDEO_PROMPT,
@@ -40,8 +43,15 @@ export function PreviewStep({
   const finalUpToDate = !!comic.finalVideoUrl && !comic.finalVideoOutdated;
   const [author, setAuthor] = useState(comic.author ?? "");
   const [settingsErr, setSettingsErr] = useState<string | null>(null);
+  const [costs, setCosts] = useState<CostBreakdown | null>(null);
 
   useEffect(() => setAuthor(comic.author ?? ""), [comic.author]);
+
+  useEffect(() => {
+    api<CostBreakdown>(`/api/comics/${comic.id}/costs`)
+      .then(setCosts)
+      .catch(() => setCosts(null));
+  }, [comic]);
 
   async function saveSettings(body: { author?: string; subtitlesEnabled?: boolean }) {
     setSettingsErr(null);
@@ -70,6 +80,15 @@ export function PreviewStep({
             <p className="mt-1 text-[15px] text-ink-2">
               Une escenas, narración, música de fondo, subtítulos y títulos en un solo mp4.
             </p>
+            {costs && costs.totalUsd > 0 && (
+              <p className="mt-3 text-[13px] text-ink-2">
+                <span className="font-semibold text-ink">Costo del proyecto: {formatUsd(costs.totalUsd)}</span>
+                {" · "}
+                {costs.byKind
+                  .map((k) => `${COST_KIND_LABELS[k.kind] ?? k.kind} ${formatUsd(k.amountUsd)}`)
+                  .join(" · ")}
+              </p>
+            )}
           </div>
           {p.complete ? (
             <Button variant="primary" size="lg" onClick={onMix} loading={mixing}>
@@ -123,7 +142,7 @@ export function PreviewStep({
               <a
                 href={comic.finalVideoUrl}
                 download={`${comic.title}.mp4`}
-                className="inline-flex h-9 items-center rounded-full bg-black/[0.05] px-4 text-sm font-medium hover:bg-black/[0.08]"
+                className="inline-flex h-9 items-center rounded-full bg-white/[0.05] px-4 text-sm font-medium hover:bg-white/[0.08]"
               >
                 Descargar mp4
               </a>
@@ -294,6 +313,7 @@ function PromptsCard({ comic, onChanged }: { comic: Comic; onChanged: () => void
   const general = [
     { label: "Historia", text: comic.prompt ?? "" },
     { label: "Estilo visual", text: comic.artStyle ?? "" },
+    { label: "Tipo de animación", text: comic.motionStyle ?? "" },
     { label: "Música de fondo", text: music },
   ];
   const all = [
@@ -315,7 +335,7 @@ function PromptsCard({ comic, onChanged }: { comic: Comic; onChanged: () => void
         {general.slice(0, 2).map((g) => (
           <PromptItem key={g.label} label={g.label} text={g.text} />
         ))}
-        <div className="rounded-2xl bg-white p-4 ring-1 ring-black/[0.06]">
+        <div className="rounded-xl bg-black/20 p-4 ring-1 ring-white/[0.06]">
           <div className="mb-2 flex items-center justify-between gap-3">
             <span className="text-[13px] font-medium text-ink-2">Música de fondo · editable, se usa al mezclar</span>
             <CopyButton text={music} />
@@ -334,7 +354,7 @@ function PromptsCard({ comic, onChanged }: { comic: Comic; onChanged: () => void
           )}
         </div>
         {scenes.map((s) => (
-          <details key={s.id} className="group rounded-2xl bg-canvas px-4 py-3">
+          <details key={s.id} className="group rounded-xl bg-surface-2 px-4 py-3">
             <summary className="cursor-pointer list-none text-[14px] font-semibold">
               <span className="mr-2 inline-block text-ink-3 transition group-open:rotate-90">›</span>
               {s.name}
@@ -353,7 +373,7 @@ function PromptsCard({ comic, onChanged }: { comic: Comic; onChanged: () => void
 
 function PromptItem({ label, text }: { label: string; text: string }) {
   return (
-    <div className="rounded-2xl bg-white p-4 ring-1 ring-black/[0.06]">
+    <div className="rounded-xl bg-black/20 p-4 ring-1 ring-white/[0.06]">
       <div className="mb-2 flex items-center justify-between gap-3">
         <span className="text-[13px] font-medium text-ink-2">{label}</span>
         <CopyButton text={text} />
@@ -439,7 +459,7 @@ function PreviewPlayer({ comic }: { comic: Comic }) {
   return (
     <div>
       <div
-        className={`relative mx-auto overflow-hidden rounded-3xl bg-black shadow-[0_20px_60px_rgba(0,0,0,0.18)] ${
+        className={`relative mx-auto overflow-hidden rounded-2xl bg-black ring-1 ring-white/[0.08] shadow-[0_40px_100px_-40px_rgba(255,140,40,0.35)] ${
           vertical ? "aspect-[9/16] max-w-sm" : "aspect-video"
         }`}
       >
@@ -488,7 +508,7 @@ function PreviewPlayer({ comic }: { comic: Comic }) {
             aria-label="Reproducir vista previa"
             className="absolute inset-0 flex items-center justify-center bg-black/10 transition hover:bg-black/20"
           >
-            <span className="flex h-20 w-20 items-center justify-center rounded-full bg-white/85 pl-1 text-3xl text-ink shadow-xl backdrop-blur-md">
+            <span className="flex h-20 w-20 items-center justify-center rounded-full bg-accent pl-1 text-3xl text-on-accent shadow-[0_10px_40px_-8px_rgba(255,178,36,0.8)]">
               ▶
             </span>
           </button>
@@ -507,10 +527,10 @@ function PreviewPlayer({ comic }: { comic: Comic }) {
               key={s.id}
               onClick={() => setIndex(i)}
               title={s.title ?? `Escena ${i + 1}`}
-              className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/[0.08]"
+              className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.08]"
             >
               <span
-                className="block h-full rounded-full bg-ink"
+                className="block h-full rounded-full bg-accent"
                 style={{ width: i < index ? "100%" : i === index ? `${Math.min(100, (t / dur) * 100)}%` : "0%" }}
               />
             </button>

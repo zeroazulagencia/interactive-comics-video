@@ -1,6 +1,8 @@
 // Cliente mínimo de OpenAI vía fetch (sin SDK).
 // Modelos configurables por env; por defecto gpt-5.5 (texto) y gpt-image-1 (imagen).
 
+import { imageCost, textCost, type ImageUsage, type TextUsage } from "@/lib/pricing";
+
 const API = "https://api.openai.com/v1";
 
 export const TEXT_MODEL = process.env.OPENAI_TEXT_MODEL ?? "gpt-5.5";
@@ -33,14 +35,16 @@ async function call(url: string, payload: unknown): Promise<Response> {
   }
 }
 
-// Acumula el contenido de un stream SSE de chat/completions.
-async function readStreamedContent(res: Response): Promise<string> {
+// Acumula el contenido de un stream SSE de chat/completions y el uso de
+// tokens (último chunk, requiere stream_options.include_usage).
+async function readStreamedContent(res: Response): Promise<{ content: string; usage: TextUsage | null }> {
   const reader = res.body?.getReader();
   if (!reader) throw new Error("La respuesta no soporta streaming.");
 
   const decoder = new TextDecoder();
   let buffer = "";
   let content = "";
+  let usage: TextUsage | null = null;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -54,11 +58,13 @@ async function readStreamedContent(res: Response): Promise<string> {
       if (!trimmed.startsWith("data:")) continue;
       const data = trimmed.slice(5).trim();
       if (data === "[DONE]") continue;
-      const delta = JSON.parse(data)?.choices?.[0]?.delta?.content;
+      const chunk = JSON.parse(data);
+      const delta = chunk?.choices?.[0]?.delta?.content;
       if (delta) content += delta;
+      if (chunk?.usage) usage = chunk.usage;
     }
   }
-  return content || "{}";
+  return { content: content || "{}", usage };
 }
 
 export type GeneratedScene = {
@@ -72,6 +78,7 @@ export type GeneratedScene = {
 export type GeneratedStory = {
   scenes: GeneratedScene[];
   musicPrompt: string; // música de fondo acorde al tono de la historia (inglés)
+  costUsd: number;
 };
 
 // Genera ~10 escenas a partir del prompt e historia + estilo de ilustración.
@@ -79,7 +86,8 @@ export type GeneratedStory = {
 // para ayudar a entender mejor lo que se narra.
 export async function generateScenes(
   prompt: string,
-  artStyle: string
+  artStyle: string,
+  motionStyle = ""
 ): Promise<GeneratedStory> {
   const system = `Eres un guionista y director de arte. A partir de una idea, desarrollas una historia en ESCENAS.
 Reglas:
@@ -87,14 +95,14 @@ Reglas:
 - Cada escena es breve: describe lo que SUCEDE, no un guion extenso.
 - "narration": locución/texto que narra el suceso, de 2 a 3 oraciones, evocador pero sin extenderse demasiado (el audio no debe superar ~12 segundos).
 - "imagePrompts": arreglo de EXACTAMENTE 2 prompts (en inglés), cada uno para UNA sola ilustración (no viñetas de cómic). Deben mostrar DOS MOMENTOS O ÁNGULOS DISTINTOS dentro de la misma escena (ej. un establishing shot y luego un close-up de la acción/emoción clave), para ayudar a entender mejor la historia que se narra — no repitas la misma composición. Describe composición, encuadre, luz, color, sujetos, ambiente y detalles en cada uno. Integra SIEMPRE el estilo indicado para mantener coherencia entre todas las escenas.
-- "videoPrompts": arreglo de EXACTAMENTE 2 prompts de animación (en inglés), uno para CADA imagePrompt. IMPORTANTE: NUNCA intentes animar personas o figuras (los modelos de video distorsionan los rostros/cuerpos). Enfócate SOLO en: cámara (slow pan/tilt/push-in/zoom), elementos atmosféricos (polvo, humo, luz, sombras, partículas), objetos inanimados (papeles, cortinas, hojas, agua) y efectos de luz. Ejemplo: "soft slow push-in camera, dust motes floating in warm light, shadows deepening slowly across the room". NUNCA uses palabras como "person", "people", "character" en videoPrompts.
+- "videoPrompts": arreglo de EXACTAMENTE 2 prompts de animación (en inglés), uno para CADA imagePrompt. IMPORTANTE: NUNCA intentes animar personas o figuras (los modelos de video distorsionan los rostros/cuerpos). Enfócate SOLO en: cámara (slow pan/tilt/push-in/zoom), elementos atmosféricos (polvo, humo, luz, sombras, partículas), objetos inanimados (papeles, cortinas, hojas, agua) y efectos de luz. Ejemplo: "soft slow push-in camera, dust motes floating in warm light, shadows deepening slowly across the room". NUNCA uses palabras como "person", "people", "character" en videoPrompts. Si se indica un TIPO DE ANIMACIÓN, todos los videoPrompts deben seguirlo.
 - "title": título corto de la escena.
 - "musicPrompt" (uno para toda la historia, en inglés): música instrumental de fondo acorde al género y tono de la historia (instrumentos, tempo, atmósfera). Debe ser sutil para no tapar la narración: sin voces ni letras.
 Responde SOLO JSON válido con la forma: {"musicPrompt":"...","scenes":[{"title":"...","summary":"...","narration":"...","imagePrompts":["...","..."],"videoPrompts":["...","..."]}]}`;
 
   const user = `IDEA / HISTORIA:\n${prompt}\n\nESTILO DE ILUSTRACIÓN (aplicar a todos los imagePrompt):\n${
     artStyle || "libre, coherente en todas las escenas"
-  }`;
+  }${motionStyle ? `\n\nTIPO DE ANIMACIÓN (aplicar a todos los videoPrompt):\n${motionStyle}` : ""}`;
 
   // Streaming: la generación de >=10 escenas tarda más de lo que algunos
   // proxies toleran sin recibir bytes; sin stream la respuesta no envía
@@ -107,6 +115,7 @@ Responde SOLO JSON válido con la forma: {"musicPrompt":"...","scenes":[{"title"
     ],
     response_format: { type: "json_object" },
     stream: true,
+    stream_options: { include_usage: true },
   });
 
   if (!res.ok) {
@@ -114,7 +123,7 @@ Responde SOLO JSON válido con la forma: {"musicPrompt":"...","scenes":[{"title"
     throw new Error(`OpenAI (${TEXT_MODEL}) ${res.status}: ${err}`);
   }
 
-  const content = await readStreamedContent(res);
+  const { content, usage } = await readStreamedContent(res);
   let parsed: { scenes?: unknown; escenas?: unknown; musicPrompt?: unknown };
   try {
     parsed = JSON.parse(content);
@@ -126,7 +135,7 @@ Responde SOLO JSON válido con la forma: {"musicPrompt":"...","scenes":[{"title"
   if (scenes.length === 0) {
     throw new Error("El modelo no devolvió escenas válidas.");
   }
-  return { scenes, musicPrompt: str(parsed.musicPrompt) };
+  return { scenes, musicPrompt: str(parsed.musicPrompt), costUsd: textCost(TEXT_MODEL, usage) };
 }
 
 function str(v: unknown): string {
@@ -159,6 +168,7 @@ export type YoutubeMeta = {
   title: string;
   description: string;
   tags: string[];
+  costUsd: number;
 };
 
 // Genera título, descripción y etiquetas para publicar el video en YouTube.
@@ -188,6 +198,7 @@ ${input.vertical ? "- Es un video vertical para YouTube Shorts: incluye #Shorts 
     ],
     response_format: { type: "json_object" },
     stream: true,
+    stream_options: { include_usage: true },
   });
 
   if (!res.ok) {
@@ -195,9 +206,10 @@ ${input.vertical ? "- Es un video vertical para YouTube Shorts: incluye #Shorts 
     throw new Error(`OpenAI (${TEXT_MODEL}) ${res.status}: ${err}`);
   }
 
+  const { content, usage } = await readStreamedContent(res);
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(await readStreamedContent(res));
+    parsed = JSON.parse(content);
   } catch {
     throw new Error("El modelo devolvió un JSON inválido.");
   }
@@ -205,7 +217,7 @@ ${input.vertical ? "- Es un video vertical para YouTube Shorts: incluye #Shorts 
   const description = str(parsed.description);
   const tags = Array.isArray(parsed.tags) ? parsed.tags.map(str).filter(Boolean) : [];
   if (!title || !description) throw new Error("El modelo no devolvió título y descripción.");
-  return { title, description, tags };
+  return { title, description, tags, costUsd: textCost(TEXT_MODEL, usage) };
 }
 
 // Tamaños soportados por gpt-image-1 según la proporción del proyecto.
@@ -213,11 +225,11 @@ export function imageSizeFor(aspectRatio: string): "1024x1536" | "1536x1024" {
   return aspectRatio === "vertical" ? "1024x1536" : "1536x1024";
 }
 
-// Genera una imagen y devuelve el PNG en base64.
+// Genera una imagen y devuelve el PNG en base64 y su costo.
 export async function generateImage(
   imagePrompt: string,
   size: "1024x1024" | "1024x1536" | "1536x1024" = "1024x1024"
-): Promise<string> {
+): Promise<{ b64: string; costUsd: number }> {
   const res = await call(`${API}/images/generations`, {
     model: IMAGE_MODEL,
     prompt: imagePrompt,
@@ -233,5 +245,5 @@ export async function generateImage(
   const data = await res.json();
   const b64 = data.data?.[0]?.b64_json;
   if (!b64) throw new Error("La API no devolvió imagen.");
-  return b64;
+  return { b64, costUsd: imageCost(IMAGE_MODEL, data.usage as ImageUsage | undefined) };
 }

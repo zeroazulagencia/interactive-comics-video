@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Interactive Comics — Estudio",
-  description: "Comics interactivos",
+  title: "Narra — Estudio de video narrado",
+  description: "De una idea a una historia en video: guion, ilustraciones, voz, animación y música.",
 };
 
 export default function RootLayout({

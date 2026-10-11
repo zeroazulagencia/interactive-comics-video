@@ -4,7 +4,7 @@ import path from "path";
 import { prisma } from "@/lib/prisma";
 import { mixComic } from "@/lib/ffmpeg";
 import { generateMusic } from "@/lib/replicate";
-import { splitSentences } from "@/lib/comic";
+import { musicPromptFor, splitSentences } from "@/lib/comic";
 
 export const maxDuration = 300;
 
@@ -62,8 +62,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     });
 
     // Música de fondo acorde a la historia.
-    const musicPrompt = `Soft ambient instrumental, slow piano and strings, subtle and understated background music for a serious historical documentary titled "${comic.title}". Atmospheric, no drums, no vocals, calm and respectful mood.`;
-    const musicSourceUrl = await generateMusic(musicPrompt, MUSIC_SECONDS);
+    const musicSourceUrl = await generateMusic(musicPromptFor(comic), MUSIC_SECONDS);
     const musicRes = await fetch(musicSourceUrl);
     if (!musicRes.ok) throw new Error("No se pudo descargar la música generada.");
     const musicBuffer = Buffer.from(await musicRes.arrayBuffer());

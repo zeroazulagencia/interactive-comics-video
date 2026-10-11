@@ -1,14 +1,11 @@
 "use client";
 
-import { DEFAULT_AUTHOR } from "@/lib/comic";
-import { Button, Card, Notice, Switch, inputClass, labelClass } from "@/components/ui";
+import { Button, Card, Notice, inputClass, labelClass } from "@/components/ui";
 
 export type IdeaForm = {
   title: string;
   prompt: string;
   artStyle: string;
-  author: string;
-  subtitlesEnabled: boolean;
 };
 
 const STYLE_PRESETS: { name: string; style: string; swatch: string }[] = [
@@ -125,22 +122,6 @@ export function IdeaStep({
       </div>
 
       <div className="flex flex-col gap-6">
-        <Card className="p-6">
-          <h3 className="mb-4 text-[15px] font-semibold">Créditos y video</h3>
-          <label className={labelClass}>Autor</label>
-          <input
-            className={`${inputClass} mb-5`}
-            placeholder={DEFAULT_AUTHOR}
-            value={form.author}
-            onChange={(e) => onChange({ author: e.target.value })}
-          />
-          <Switch
-            label="Subtítulos"
-            checked={form.subtitlesEnabled}
-            onChange={(v) => onChange({ subtitlesEnabled: v })}
-          />
-        </Card>
-
         <Card className="flex flex-col gap-3 p-6">
           <Button variant="primary" size="lg" onClick={onGenerate} loading={generating} disabled={!form.prompt.trim()}>
             {generating ? "Escribiendo escenas…" : sceneCount ? "Regenerar escenas" : "Generar escenas"}
@@ -150,7 +131,7 @@ export function IdeaStep({
           </Button>
           {sceneCount > 0 && !generating && (
             <p className="text-center text-[12px] text-ink-3">
-              Regenerar reemplaza las {sceneCount} escenas actuales y su contenido.
+              Los cambios en la historia o el estilo solo se aplican al regenerar las escenas.
             </p>
           )}
           {generating && <Notice>Esto puede tardar hasta un minuto.</Notice>}

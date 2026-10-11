@@ -29,6 +29,10 @@ export type Comic = {
   aspectRatio: string;
   finalVideoUrl: string | null;
   finalVideoOutdated: boolean;
+  musicPrompt: string | null;
+  youtubeTitle: string | null;
+  youtubeDescription: string | null;
+  youtubeTags: string | null;
   scenes: Scene[];
 };
 
@@ -50,6 +54,15 @@ export const DEFAULT_AUTHOR = "Cristian Parada";
 
 export const DEFAULT_VIDEO_PROMPT =
   "gentle camera motion with slow pan, atmospheric dust particles floating in light, subtle shadow shifts, soft ambient movement throughout the scene";
+
+// Prompt de la música de fondo que se genera al mezclar (meta/musicgen).
+// Usa el del proyecto; si no hay (proyectos anteriores), uno neutro.
+export function musicPromptFor(c: { title: string; musicPrompt: string | null }): string {
+  return (
+    c.musicPrompt?.trim() ||
+    `Subtle cinematic instrumental background music for a narrated story titled "${c.title}". Atmospheric and understated, no vocals.`
+  );
+}
 
 export function sceneProgress(s: Scene) {
   const panels = s.panels.length;

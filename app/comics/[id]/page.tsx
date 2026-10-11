@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { api, comicProgress, DEFAULT_AUTHOR, DEFAULT_VIDEO_PROMPT, type Comic, type Panel } from "@/lib/comic";
-import { Button, SegmentedControl } from "@/components/ui";
+import { api, comicProgress, DEFAULT_VIDEO_PROMPT, type Comic, type Panel } from "@/lib/comic";
+import { Badge, SegmentedControl } from "@/components/ui";
 import { IdeaStep, type IdeaForm } from "@/components/studio/IdeaStep";
 import { StoryboardStep } from "@/components/studio/StoryboardStep";
 import { ProductionStep, type Batch, type BatchError, type TaskKind } from "@/components/studio/ProductionStep";
@@ -22,8 +22,6 @@ function formFrom(c: Comic): IdeaForm {
     title: c.title,
     prompt: c.prompt ?? "",
     artStyle: c.artStyle ?? "",
-    author: c.author ?? DEFAULT_AUTHOR,
-    subtitlesEnabled: c.subtitlesEnabled ?? true,
   };
 }
 
@@ -292,18 +290,12 @@ export default function ComicStudio() {
                 {progress.done}/{progress.total} listos
               </span>
             )}
-            {hasScenes && !progress.complete && (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  setStep("production");
-                  if (!batch) runBatch(["voces", "ilustraciones", "animaciones"]);
-                }}
-                loading={!!batch}
-              >
-                {batch ? `${batch.current}/${batch.total}` : "Producir todo"}
-              </Button>
+            {batch && step !== "production" && (
+              <button onClick={() => setStep("production")}>
+                <Badge tone="working">
+                  Produciendo {batch.current}/{batch.total}
+                </Badge>
+              </button>
             )}
           </div>
         </div>
@@ -353,6 +345,7 @@ export default function ComicStudio() {
             mixError={mixError}
             onMix={mix}
             onGoToProduction={() => setStep("production")}
+            onChanged={() => load()}
           />
         )}
       </main>

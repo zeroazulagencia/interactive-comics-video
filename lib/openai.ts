@@ -69,13 +69,18 @@ export type GeneratedScene = {
   videoPrompts: [string, string]; // prompt de animación para cada panel (inglés)
 };
 
+export type GeneratedStory = {
+  scenes: GeneratedScene[];
+  musicPrompt: string; // música de fondo acorde al tono de la historia (inglés)
+};
+
 // Genera ~10 escenas a partir del prompt e historia + estilo de ilustración.
 // Cada escena trae 2 prompts de imagen (dos momentos distintos de la escena)
 // para ayudar a entender mejor lo que se narra.
 export async function generateScenes(
   prompt: string,
   artStyle: string
-): Promise<GeneratedScene[]> {
+): Promise<GeneratedStory> {
   const system = `Eres un guionista y director de arte. A partir de una idea, desarrollas una historia en ESCENAS.
 Reglas:
 - Devuelve ALREDEDOR DE 10 escenas (ni muchas más ni menos, salvo que la historia realmente lo pida).
@@ -84,7 +89,8 @@ Reglas:
 - "imagePrompts": arreglo de EXACTAMENTE 2 prompts (en inglés), cada uno para UNA sola ilustración (no viñetas de cómic). Deben mostrar DOS MOMENTOS O ÁNGULOS DISTINTOS dentro de la misma escena (ej. un establishing shot y luego un close-up de la acción/emoción clave), para ayudar a entender mejor la historia que se narra — no repitas la misma composición. Describe composición, encuadre, luz, color, sujetos, ambiente y detalles en cada uno. Integra SIEMPRE el estilo indicado para mantener coherencia entre todas las escenas.
 - "videoPrompts": arreglo de EXACTAMENTE 2 prompts de animación (en inglés), uno para CADA imagePrompt. IMPORTANTE: NUNCA intentes animar personas o figuras (los modelos de video distorsionan los rostros/cuerpos). Enfócate SOLO en: cámara (slow pan/tilt/push-in/zoom), elementos atmosféricos (polvo, humo, luz, sombras, partículas), objetos inanimados (papeles, cortinas, hojas, agua) y efectos de luz. Ejemplo: "soft slow push-in camera, dust motes floating in warm light, shadows deepening slowly across the room". NUNCA uses palabras como "person", "people", "character" en videoPrompts.
 - "title": título corto de la escena.
-Responde SOLO JSON válido con la forma: {"scenes":[{"title":"...","summary":"...","narration":"...","imagePrompts":["...","..."],"videoPrompts":["...","..."]}]}`;
+- "musicPrompt" (uno para toda la historia, en inglés): música instrumental de fondo acorde al género y tono de la historia (instrumentos, tempo, atmósfera). Debe ser sutil para no tapar la narración: sin voces ni letras.
+Responde SOLO JSON válido con la forma: {"musicPrompt":"...","scenes":[{"title":"...","summary":"...","narration":"...","imagePrompts":["...","..."],"videoPrompts":["...","..."]}]}`;
 
   const user = `IDEA / HISTORIA:\n${prompt}\n\nESTILO DE ILUSTRACIÓN (aplicar a todos los imagePrompt):\n${
     artStyle || "libre, coherente en todas las escenas"
@@ -109,7 +115,7 @@ Responde SOLO JSON válido con la forma: {"scenes":[{"title":"...","summary":"..
   }
 
   const content = await readStreamedContent(res);
-  let parsed: { scenes?: unknown; escenas?: unknown };
+  let parsed: { scenes?: unknown; escenas?: unknown; musicPrompt?: unknown };
   try {
     parsed = JSON.parse(content);
   } catch {
@@ -120,7 +126,7 @@ Responde SOLO JSON válido con la forma: {"scenes":[{"title":"...","summary":"..
   if (scenes.length === 0) {
     throw new Error("El modelo no devolvió escenas válidas.");
   }
-  return scenes;
+  return { scenes, musicPrompt: str(parsed.musicPrompt) };
 }
 
 function str(v: unknown): string {
@@ -147,6 +153,59 @@ function normalizeScene(s: unknown): GeneratedScene | null {
     imagePrompts,
     videoPrompts: pair(o.videoPrompts),
   };
+}
+
+export type YoutubeMeta = {
+  title: string;
+  description: string;
+  tags: string[];
+};
+
+// Genera título, descripción y etiquetas para publicar el video en YouTube.
+export async function generateYoutubeMeta(input: {
+  title: string;
+  author: string;
+  prompt: string;
+  narrations: string[];
+  vertical: boolean;
+}): Promise<YoutubeMeta> {
+  const system = `Eres especialista en publicar videos narrados en YouTube. A partir de la historia de un video, escribes en español el texto para publicarlo.
+Reglas:
+- "title": atractivo y claro, máximo 90 caracteres, sin clickbait engañoso ni MAYÚSCULAS completas.
+- "description": 3 a 5 párrafos cortos. Empieza con un gancho de 1-2 oraciones (lo que se ve en la vista previa), luego un resumen sin revelar el final, una línea de créditos con el autor y una invitación a suscribirse. Termina con 3 a 5 hashtags relevantes en una línea. Máximo 4500 caracteres.
+- "tags": entre 10 y 20 etiquetas de búsqueda (sin #), en español, de más general a más específica; en total no deben superar 450 caracteres.
+${input.vertical ? "- Es un video vertical para YouTube Shorts: incluye #Shorts entre los hashtags.\n" : ""}Responde SOLO JSON válido con la forma: {"title":"...","description":"...","tags":["..."]}`;
+
+  const user = `TÍTULO DEL PROYECTO: ${input.title}\nAUTOR: ${input.author}\n\nIDEA ORIGINAL:\n${
+    input.prompt
+  }\n\nNARRACIÓN COMPLETA (en orden):\n${input.narrations.map((n, i) => `${i + 1}. ${n}`).join("\n")}`;
+
+  const res = await call(`${API}/chat/completions`, {
+    model: TEXT_MODEL,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    response_format: { type: "json_object" },
+    stream: true,
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`OpenAI (${TEXT_MODEL}) ${res.status}: ${err}`);
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(await readStreamedContent(res));
+  } catch {
+    throw new Error("El modelo devolvió un JSON inválido.");
+  }
+  const title = str(parsed.title);
+  const description = str(parsed.description);
+  const tags = Array.isArray(parsed.tags) ? parsed.tags.map(str).filter(Boolean) : [];
+  if (!title || !description) throw new Error("El modelo no devolvió título y descripción.");
+  return { title, description, tags };
 }
 
 // Tamaños soportados por gpt-image-1 según la proporción del proyecto.

@@ -21,7 +21,7 @@ export async function POST(
   }
 
   try {
-    const scenes = await generateScenes(comic.prompt, comic.artStyle ?? "");
+    const { scenes, musicPrompt } = await generateScenes(comic.prompt, comic.artStyle ?? "");
 
     // Reemplaza las escenas anteriores en una sola transacción: si algo falla,
     // se conservan las existentes.
@@ -46,7 +46,10 @@ export async function POST(
           },
         });
       }),
-      prisma.comic.update({ where: { id: comic.id }, data: { finalVideoOutdated: true } }),
+      prisma.comic.update({
+        where: { id: comic.id },
+        data: { finalVideoOutdated: true, musicPrompt: musicPrompt || null },
+      }),
     ]);
 
     const updated = await prisma.comic.findUnique({

@@ -28,7 +28,18 @@ export async function PATCH(
 ) {
   const body = await req.json();
   const data: Record<string, unknown> = {};
-  for (const k of ["title", "prompt", "artStyle", "published", "author", "subtitlesEnabled"]) {
+  for (const k of [
+    "title",
+    "prompt",
+    "artStyle",
+    "published",
+    "author",
+    "subtitlesEnabled",
+    "musicPrompt",
+    "youtubeTitle",
+    "youtubeDescription",
+    "youtubeTags",
+  ]) {
     if (k in body) data[k] = body[k];
   }
 
@@ -36,8 +47,8 @@ export async function PATCH(
   if (!current) {
     return NextResponse.json({ error: "No encontrado" }, { status: 404 });
   }
-  // Campos que aparecen en el video final (tarjetas de título y subtítulos).
-  const affectsVideo = (["title", "author", "subtitlesEnabled"] as const).some(
+  // Campos que aparecen en el video final (tarjetas de título, subtítulos y música).
+  const affectsVideo = (["title", "author", "subtitlesEnabled", "musicPrompt"] as const).some(
     (k) => k in data && data[k] !== current[k]
   );
   if (affectsVideo) data.finalVideoOutdated = true;

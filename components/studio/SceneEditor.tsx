@@ -4,8 +4,6 @@ import { useEffect, useState } from "react";
 import { api, DEFAULT_VIDEO_PROMPT, type Panel, type Scene } from "@/lib/comic";
 import { Button, Notice, Spinner, inputClass, labelClass } from "@/components/ui";
 
-const VIDEO_SECONDS_OPTIONS = [1, 2, 3, 4, 5];
-
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 function SaveIndicator({ state }: { state: SaveState }) {
@@ -35,13 +33,12 @@ export function SceneEditor({
   onDeleted: () => void;
 }) {
   const [title, setTitle] = useState(scene.title ?? "");
-  const [summary, setSummary] = useState(scene.summary ?? "");
   const [narration, setNarration] = useState(scene.narration ?? "");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [genVoice, setGenVoice] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function patch(body: Partial<Record<"title" | "summary" | "narration", string>>) {
+  async function patch(body: Partial<Record<"title" | "narration", string>>) {
     setSaveState("saving");
     try {
       await api(`/api/scenes/${scene.id}`, { method: "PATCH", body });
@@ -53,7 +50,7 @@ export function SceneEditor({
     }
   }
 
-  function saveIfChanged(field: "title" | "summary" | "narration", value: string) {
+  function saveIfChanged(field: "title" | "narration", value: string) {
     if (value !== (scene[field] ?? "")) patch({ [field]: value });
   }
 
@@ -98,14 +95,6 @@ export function SceneEditor({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onBlur={() => saveIfChanged("title", title)}
-        />
-        <label className={labelClass}>Qué sucede</label>
-        <textarea
-          className={`${inputClass} mb-4 resize-y`}
-          rows={2}
-          value={summary}
-          onChange={(e) => setSummary(e.target.value)}
-          onBlur={() => saveIfChanged("summary", summary)}
         />
         <label className={labelClass}>Narración</label>
         <textarea
@@ -172,7 +161,6 @@ function PanelEditor({
 }) {
   const [imagePrompt, setImagePrompt] = useState(panel.imagePrompt ?? "");
   const [videoPrompt, setVideoPrompt] = useState(panel.videoPrompt || DEFAULT_VIDEO_PROMPT);
-  const [duration, setDuration] = useState(5);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [genImg, setGenImg] = useState(false);
   const [genVideo, setGenVideo] = useState(false);
@@ -211,7 +199,7 @@ function PanelEditor({
     setGenVideo(true);
     try {
       await api(`/api/panels/${panel.id}`, { method: "PATCH", body: { videoPrompt } });
-      await api(`/api/panels/${panel.id}/generate-video`, { method: "POST", body: { duration } });
+      await api(`/api/panels/${panel.id}/generate-video`, { method: "POST", body: { duration: 5 } });
       onChanged();
     } catch (e) {
       setErr(errMsg(e, "Error generando la animación"));
@@ -265,31 +253,16 @@ function PanelEditor({
           >
             {panel.imageUrl ? "Regenerar ilustración" : "Generar ilustración"}
           </Button>
-          <div className="flex items-center rounded-full bg-black/[0.05] pl-3">
-            <select
-              aria-label="Duración de la animación"
-              className="bg-transparent text-[13px] outline-none"
-              value={duration}
-              onChange={(e) => setDuration(Number(e.target.value))}
-            >
-              {VIDEO_SECONDS_OPTIONS.map((s) => (
-                <option key={s} value={s}>
-                  {s}s
-                </option>
-              ))}
-            </select>
-            <Button
-              variant={panel.imageUrl && !panel.videoUrl ? "primary" : "secondary"}
-              size="sm"
-              onClick={animate}
-              loading={genVideo}
-              disabled={working || !panel.imageUrl || !videoPrompt.trim()}
-              title={!panel.imageUrl ? "Genera primero la ilustración" : undefined}
-              className="ml-2"
-            >
-              {panel.videoUrl ? "Regenerar animación" : "Animar"}
-            </Button>
-          </div>
+          <Button
+            variant={panel.imageUrl && !panel.videoUrl ? "primary" : "secondary"}
+            size="sm"
+            onClick={animate}
+            loading={genVideo}
+            disabled={working || !panel.imageUrl || !videoPrompt.trim()}
+            title={!panel.imageUrl ? "Genera primero la ilustración" : undefined}
+          >
+            {panel.videoUrl ? "Regenerar animación" : "Animar"}
+          </Button>
         </div>
         {panel.imageUrl && panel.videoUrl && (
           <p className="mt-2 text-[12px] text-ink-3">Regenerar la ilustración descarta la animación actual.</p>

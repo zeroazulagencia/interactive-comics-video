@@ -36,13 +36,13 @@ export function ProductionStep({
   const p = comicProgress(comic);
   const pending = p.total - p.done;
 
-  const rows: { kind: TaskKind; title: string; model: string; done: number; total: number; note?: string }[] = [
-    { kind: "voces", title: "Voces", model: "Narración · minimax speech-02-hd", done: p.voices, total: p.scenes },
-    { kind: "ilustraciones", title: "Ilustraciones", model: "Imagen · gpt-image-1", done: p.images, total: p.panels },
+  const rows: { kind: TaskKind; title: string; detail: string; done: number; total: number; note?: string }[] = [
+    { kind: "voces", title: "Voces", detail: "Narración de cada escena", done: p.voices, total: p.scenes },
+    { kind: "ilustraciones", title: "Ilustraciones", detail: "Una imagen por panel", done: p.images, total: p.panels },
     {
       kind: "animaciones",
       title: "Animaciones",
-      model: "Video · p-video",
+      detail: "Movimiento de cada ilustración",
       done: p.videos,
       total: p.panels,
       note: p.images < p.panels ? "Solo se animan los paneles que ya tienen ilustración." : undefined,
@@ -107,7 +107,7 @@ export function ProductionStep({
                   <span className="text-[15px] font-semibold">{r.title}</span>
                   {running && <Spinner className="h-3 w-3 text-accent" />}
                 </div>
-                <p className="text-[12px] text-ink-3">{r.model}</p>
+                <p className="text-[12px] text-ink-3">{r.detail}</p>
               </div>
               <div className="min-w-[140px] flex-1">
                 <ProgressBar value={r.done} total={r.total} />

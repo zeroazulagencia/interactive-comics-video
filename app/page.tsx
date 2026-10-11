@@ -4,7 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api, formatUsd, type ComicSummary, type CostSummary, type ProviderBalance } from "@/lib/comic";
-import { Badge, Button, Card, Dialog, Logo, Notice, ProgressBar, inputClass, labelClass } from "@/components/ui";
+import { Badge, Button, Card, Dialog, Logo, Notice, ProgressBar, Spinner, inputClass, labelClass } from "@/components/ui";
+import type { DesktopRelease } from "@/app/api/desktop-release/route";
+
+type Settings = { desktop: boolean; openai: boolean; replicate: boolean };
 
 function statusOf(c: ComicSummary): { tone: "done" | "working" | "warn" | "pending"; label: string } {
   if (c.finalVideoUrl && c.finalVideoOutdated) return { tone: "warn", label: "Video desactualizado" };
@@ -20,6 +23,15 @@ export default function Home() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [costs, setCosts] = useState<CostSummary | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  function loadSettings() {
+    api<Settings>("/api/settings")
+      .then(setSettings)
+      .catch(() => setSettings(null));
+  }
 
   async function load() {
     try {
@@ -35,6 +47,7 @@ export default function Home() {
 
   useEffect(() => {
     load();
+    loadSettings();
   }, []);
 
   async function remove(c: ComicSummary) {
@@ -54,9 +67,22 @@ export default function Home() {
       <nav className="sticky top-0 z-40 border-b border-white/[0.06] bg-canvas/75 backdrop-blur-xl backdrop-saturate-150">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
           <Logo />
-          <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-            + Nuevo proyecto
-          </Button>
+          <div className="flex items-center gap-2">
+            {settings?.desktop ? (
+              <Button variant="secondary" size="sm" onClick={() => setSettingsOpen(true)}>
+                Ajustes
+              </Button>
+            ) : (
+              settings && (
+                <Button variant="secondary" size="sm" onClick={() => setDownloadOpen(true)}>
+                  <AppleIcon /> Descargar app
+                </Button>
+              )
+            )}
+            <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+              + Nuevo proyecto
+            </Button>
+          </div>
         </div>
       </nav>
 
@@ -89,6 +115,17 @@ export default function Home() {
             </div>
           )}
         </header>
+
+        {settings?.desktop && (!settings.openai || !settings.replicate) && (
+          <div className="mb-8">
+            <Notice tone="warn">
+              Para generar contenido, agrega tus claves de OpenAI y Replicate.{" "}
+              <button type="button" className="font-semibold underline" onClick={() => setSettingsOpen(true)}>
+                Abrir Ajustes
+              </button>
+            </Notice>
+          </div>
+        )}
 
         {loadError && (
           <div className="mb-8">
@@ -179,6 +216,18 @@ export default function Home() {
           onClose={() => setCreating(false)}
           onCreated={(id) => router.push(`/comics/${id}`)}
         />
+        <DownloadAppDialog open={downloadOpen} onClose={() => setDownloadOpen(false)} />
+        {settings?.desktop && (
+          <SettingsDialog
+            open={settingsOpen}
+            settings={settings}
+            onClose={() => setSettingsOpen(false)}
+            onSaved={() => {
+              setSettingsOpen(false);
+              loadSettings();
+            }}
+          />
+        )}
       </main>
     </div>
   );
@@ -376,6 +425,173 @@ function NewProjectDialog({
           </Button>
           <Button type="submit" variant="primary" loading={saving} disabled={!title.trim()}>
             Crear proyecto
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+function AppleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="currentColor" aria-hidden>
+      <path d="M16.37 12.6c-.02-2.2 1.8-3.26 1.88-3.31-1.03-1.5-2.62-1.7-3.19-1.73-1.36-.14-2.65.8-3.34.8-.69 0-1.75-.78-2.88-.76-1.48.02-2.85.86-3.61 2.19-1.54 2.67-.39 6.62 1.11 8.79.73 1.06 1.6 2.25 2.75 2.2 1.1-.04 1.52-.71 2.85-.71 1.33 0 1.71.71 2.88.69 1.19-.02 1.94-1.08 2.67-2.14.84-1.23 1.19-2.42 1.21-2.48-.03-.01-2.32-.89-2.33-3.54zM14.18 6.13c.61-.74 1.02-1.76.91-2.78-.88.04-1.94.59-2.57 1.32-.56.65-1.06 1.69-.93 2.69.98.08 1.98-.5 2.59-1.23z" />
+    </svg>
+  );
+}
+
+const ARCH_LABELS: Record<DesktopRelease["downloads"][number]["arch"], { title: string; hint: string }> = {
+  arm64: { title: "Mac con Apple Silicon", hint: "Chips M1, M2, M3, M4 o posteriores" },
+  x64: { title: "Mac con Intel", hint: "Modelos anteriores a 2021" },
+};
+
+// Descarga de la app para Mac desde la última versión publicada en GitHub Releases.
+function DownloadAppDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [release, setRelease] = useState<DesktopRelease | null | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setError(null);
+    api<{ release: DesktopRelease | null }>("/api/desktop-release")
+      .then((r) => setRelease(r.release))
+      .catch((e) => setError(e instanceof Error ? e.message : "No se pudo consultar la versión"));
+  }, [open]);
+
+  return (
+    <Dialog open={open} onClose={onClose} title="Narra para Mac">
+      <p className="mb-5 text-[14px] text-ink-2">
+        La misma app, instalada en tu Mac. Tus proyectos y archivos se guardan en tu equipo; solo necesitas tus claves de
+        OpenAI y Replicate.
+      </p>
+
+      {error ? (
+        <Notice tone="error">{error}</Notice>
+      ) : release === undefined ? (
+        <div className="flex items-center gap-2 py-6 text-[14px] text-ink-2">
+          <Spinner /> Buscando la última versión…
+        </div>
+      ) : release === null ? (
+        <Notice>La primera versión para Mac se está preparando. Vuelve a intentarlo en unos minutos.</Notice>
+      ) : (
+        <>
+          <div className="mb-2 flex flex-col gap-2">
+            {release.downloads.map((d) => (
+              <a
+                key={d.arch}
+                href={d.url}
+                className="flex items-center gap-4 rounded-xl bg-white/[0.04] px-4 py-3 ring-1 ring-inset ring-white/[0.08] transition hover:bg-white/[0.08] hover:ring-accent/40"
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/[0.06] text-ink">
+                  <AppleIcon />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[15px] font-medium">{ARCH_LABELS[d.arch].title}</span>
+                  <span className="block text-[12px] text-ink-3">
+                    {ARCH_LABELS[d.arch].hint} · {d.sizeMb} MB
+                  </span>
+                </span>
+                <span className="text-[13px] font-semibold text-accent">Descargar</span>
+              </a>
+            ))}
+          </div>
+          <p className="mb-5 text-[12px] text-ink-3">
+            Versión {release.version}. ¿No sabes cuál es tu Mac? Menú  → Acerca de este Mac → Chip o Procesador.
+          </p>
+          <div className="rounded-xl bg-surface-2 px-4 py-3 text-[13px] leading-relaxed text-ink-2">
+            <p className="mb-1 font-medium text-ink">Cómo instalarla</p>
+            <ol className="list-decimal pl-4">
+              <li>Abre el archivo .dmg y arrastra Narra a Aplicaciones.</li>
+              <li>
+                La app aún no está firmada por Apple: la primera vez, haz clic derecho sobre Narra → Abrir. Si macOS indica
+                que está dañada, ejecuta en Terminal:{" "}
+                <code className="rounded bg-black/40 px-1 py-0.5 text-[12px]">xattr -cr /Applications/Narra.app</code>
+              </li>
+            </ol>
+          </div>
+        </>
+      )}
+
+      <div className="mt-6 flex justify-end">
+        <Button variant="secondary" onClick={onClose}>
+          Cerrar
+        </Button>
+      </div>
+    </Dialog>
+  );
+}
+
+// Claves de API de la app de escritorio. Nunca se muestran: solo se indica si están guardadas.
+function SettingsDialog({
+  open,
+  settings,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  settings: Settings;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [openai, setOpenai] = useState("");
+  const [replicate, setReplicate] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await api("/api/settings", { method: "PUT", body: { openai, replicate } });
+      setOpenai("");
+      setReplicate("");
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const fields = [
+    { label: "Clave de OpenAI", value: openai, set: setOpenai, saved: settings.openai, placeholder: "sk-…" },
+    { label: "Clave de Replicate", value: replicate, set: setReplicate, saved: settings.replicate, placeholder: "r8_…" },
+  ];
+
+  return (
+    <Dialog open={open} onClose={onClose} title="Ajustes">
+      <form onSubmit={submit}>
+        {fields.map((f) => (
+          <div key={f.label} className="mb-5">
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="text-[13px] font-medium text-ink-2">{f.label}</label>
+              <Badge tone={f.saved ? "done" : "warn"}>{f.saved ? "Guardada" : "Falta"}</Badge>
+            </div>
+            <input
+              type="password"
+              autoComplete="off"
+              className={inputClass}
+              placeholder={f.saved ? "Deja vacío para conservar la actual" : f.placeholder}
+              value={f.value}
+              onChange={(e) => f.set(e.target.value)}
+            />
+          </div>
+        ))}
+        <p className="mb-6 text-[12px] text-ink-3">Las claves se guardan solo en este Mac.</p>
+
+        {error && (
+          <div className="mb-4">
+            <Notice tone="error">{error}</Notice>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button type="submit" variant="primary" loading={saving} disabled={!openai.trim() && !replicate.trim()}>
+            Guardar
           </Button>
         </div>
       </form>

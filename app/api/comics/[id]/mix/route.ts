@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { prisma } from "@/lib/prisma";
+import { MEDIA_DIR, mediaPath } from "@/lib/paths";
 import { mixComic } from "@/lib/ffmpeg";
 import { generateMusic, MUSIC_MODEL } from "@/lib/replicate";
 import { recordCost } from "@/lib/costs";
@@ -44,15 +45,14 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   }
 
   try {
-    const publicDir = path.join(process.cwd(), "public");
-    const generatedDir = path.join(publicDir, "generated");
+    const generatedDir = MEDIA_DIR;
     await mkdir(generatedDir, { recursive: true });
 
     const scenes = comic.scenes.map((s) => ({
-      audioPath: path.join(publicDir, s.audioUrl!),
+      audioPath: mediaPath(s.audioUrl!),
       panelVideoPaths: [
-        path.join(publicDir, s.panels[0].videoUrl!),
-        path.join(publicDir, s.panels[1].videoUrl!),
+        mediaPath(s.panels[0].videoUrl!),
+        mediaPath(s.panels[1].videoUrl!),
       ] as [string, string],
     }));
 

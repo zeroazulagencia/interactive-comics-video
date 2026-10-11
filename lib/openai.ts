@@ -2,6 +2,7 @@
 // Modelos configurables por env; por defecto gpt-5.5 (texto) y gpt-image-1 (imagen).
 
 import { imageCost, textCost, type ImageUsage, type TextUsage } from "@/lib/pricing";
+import { apiKey } from "@/lib/settings";
 
 const API = "https://api.openai.com/v1";
 
@@ -9,8 +10,8 @@ export const TEXT_MODEL = process.env.OPENAI_TEXT_MODEL ?? "gpt-5.5";
 export const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1";
 
 function key(): string {
-  const k = process.env.OPENAI_APIKEY;
-  if (!k) throw new Error("Falta OPENAI_APIKEY en .env");
+  const k = apiKey("OPENAI_APIKEY");
+  if (!k) throw new Error("Falta la clave de OpenAI (OPENAI_APIKEY).");
   return k;
 }
 

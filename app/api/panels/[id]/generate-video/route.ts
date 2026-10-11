@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { prisma } from "@/lib/prisma";
+import { MEDIA_DIR, mediaPath } from "@/lib/paths";
 import { generateVideo, VIDEO_MODEL } from "@/lib/replicate";
 import { recordCost } from "@/lib/costs";
 
@@ -36,7 +37,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const prompt = motionStyle ? `${panel.videoPrompt}. Animation style: ${motionStyle}` : panel.videoPrompt;
 
   try {
-    const imagePath = path.join(process.cwd(), "public", panel.imageUrl);
+    const imagePath = mediaPath(panel.imageUrl);
     const imageBuffer = await readFile(imagePath);
     const mime = panel.imageUrl.endsWith(".png") ? "image/png" : "image/jpeg";
     const imageDataUri = `data:${mime};base64,${imageBuffer.toString("base64")}`;
@@ -54,7 +55,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     if (!videoRes.ok) throw new Error("No se pudo descargar el video generado.");
     const buffer = Buffer.from(await videoRes.arrayBuffer());
 
-    const dir = path.join(process.cwd(), "public", "generated");
+    const dir = MEDIA_DIR;
     await mkdir(dir, { recursive: true });
     const filename = `${panel.id}-${Date.now()}.mp4`;
     await writeFile(path.join(dir, filename), buffer);

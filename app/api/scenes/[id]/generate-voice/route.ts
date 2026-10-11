@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { prisma } from "@/lib/prisma";
+import { MEDIA_DIR } from "@/lib/paths";
 import { generateVoice, MODEL as VOICE_MODEL } from "@/lib/replicate";
 import { recordCost } from "@/lib/costs";
 
@@ -37,7 +38,7 @@ export async function POST(
     if (!audioRes.ok) throw new Error("No se pudo descargar el audio generado.");
     const buffer = Buffer.from(await audioRes.arrayBuffer());
 
-    const dir = path.join(process.cwd(), "public", "generated");
+    const dir = MEDIA_DIR;
     await mkdir(dir, { recursive: true });
     const filename = `${scene.id}-${Date.now()}.mp3`;
     await writeFile(path.join(dir, filename), buffer);

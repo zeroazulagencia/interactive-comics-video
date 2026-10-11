@@ -4,6 +4,7 @@
 // Fallback: wan-video/wan2.1-with-lora.
 
 import { musicCost, videoCost, voiceCost } from "@/lib/pricing";
+import { apiKey } from "@/lib/settings";
 
 const API = "https://api.replicate.com/v1";
 export const MODEL = "minimax/speech-02-hd";
@@ -24,8 +25,8 @@ export const VIDEO_FRAME_OPTIONS = [17, 33, 49, 65, 81] as const;
 export type VideoFrames = (typeof VIDEO_FRAME_OPTIONS)[number];
 
 function token(): string {
-  const t = process.env.REPLICATE_APIKEY;
-  if (!t) throw new Error("Falta REPLICATE_APIKEY en .env");
+  const t = apiKey("REPLICATE_APIKEY");
+  if (!t) throw new Error("Falta la clave de Replicate (REPLICATE_APIKEY).");
   return t;
 }
 

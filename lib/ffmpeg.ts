@@ -14,10 +14,11 @@ import { mkdtemp, writeFile, rm } from "fs/promises";
 import path from "path";
 import os from "os";
 import { Resvg } from "@resvg/resvg-js";
+import { ASSETS_DIR, FFMPEG_PATH, FFPROBE_PATH } from "@/lib/paths";
 
 const run = promisify(execFile);
 
-const FONT_PATH = path.join(process.cwd(), "assets", "fonts", "Montserrat-Bold.ttf");
+const FONT_PATH = path.join(ASSETS_DIR, "fonts", "Montserrat-Bold.ttf");
 const TITLE_CARD_SECONDS = 3;
 const FADE_DURATION = 2; // segundos de fadeout a negro al final
 const POST_BLACK_SECONDS = 3; // segundos extra de música sobre negro
@@ -100,7 +101,7 @@ function renderSubtitlePng(text: string, width: number, height: number): Buffer 
 }
 
 async function ffprobeDuration(file: string): Promise<number> {
-  const { stdout } = await run("ffprobe", [
+  const { stdout } = await run(FFPROBE_PATH, [
     "-v", "error",
     "-show_entries", "format=duration",
     "-of", "default=noprint_wrappers=1:nokey=1",
@@ -156,7 +157,7 @@ export async function mixComic(opts: {
         const videoDuration = await ffprobeDuration(videoPath);
         const factor = halfDuration / videoDuration;
         const partPath = path.join(tmpDir, `s${i}-p${p}.mp4`);
-        await run("ffmpeg", [
+        await run(FFMPEG_PATH, [
           "-y",
           "-i", videoPath,
           "-vf",
@@ -175,7 +176,7 @@ export async function mixComic(opts: {
       const panelListFile = path.join(tmpDir, `s${i}-list.txt`);
       await writeFile(panelListFile, panelParts.map((p) => `file '${p}'`).join("\n"));
       const sceneVideoOnly = path.join(tmpDir, `s${i}-video.mp4`);
-      await run("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", panelListFile, "-c", "copy", sceneVideoOnly]);
+      await run(FFMPEG_PATH, ["-y", "-f", "concat", "-safe", "0", "-i", panelListFile, "-c", "copy", sceneVideoOnly]);
 
       // --- Mezclar video + audio (y subtítulos si están activados) ---
       // Nota: los paneles de p-video traen audio ambiental pero se descarta
@@ -216,7 +217,7 @@ export async function mixComic(opts: {
           }
         }
 
-        await run("ffmpeg", [
+        await run(FFMPEG_PATH, [
           ...ffmpegInputs,
           "-filter_complex",
           `${filterChain}`,
@@ -234,7 +235,7 @@ export async function mixComic(opts: {
         ]);
       } else {
         // Sin subtítulos: solo video + audio de narración
-        await run("ffmpeg", [
+        await run(FFMPEG_PATH, [
           "-y",
           "-i", sceneVideoOnly,
           "-i", audioPath,
@@ -258,12 +259,12 @@ export async function mixComic(opts: {
     const narratedListFile = path.join(tmpDir, "narrated-list.txt");
     await writeFile(narratedListFile, sceneParts.map((p) => `file '${p}'`).join("\n"));
     const narratedPath = path.join(tmpDir, "narrated.mp4");
-    await run("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", narratedListFile, "-c", "copy", narratedPath]);
+    await run(FFMPEG_PATH, ["-y", "-f", "concat", "-safe", "0", "-i", narratedListFile, "-c", "copy", narratedPath]);
     const narratedDuration = await ffprobeDuration(narratedPath);
 
     // --- Música de fondo en loop, a bajo volumen ---
     const withMusicPath = path.join(tmpDir, "with-music.mp4");
-    await run("ffmpeg", [
+    await run(FFMPEG_PATH, [
       "-y",
       "-i", narratedPath,
       "-stream_loop", "-1",
@@ -288,7 +289,7 @@ export async function mixComic(opts: {
     const introPath = path.join(tmpDir, "intro.mp4");
     const outroPath = path.join(tmpDir, "outro.mp4");
     for (const cardPath of [introPath, outroPath]) {
-      await run("ffmpeg", [
+      await run(FFMPEG_PATH, [
         "-y",
         "-loop", "1",
         "-i", titleCardPng,
@@ -316,7 +317,7 @@ export async function mixComic(opts: {
       finalListFile,
       [introPath, withMusicPath, outroPath].map((p) => `file '${p}'`).join("\n")
     );
-    await run("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", finalListFile, "-c", "copy", rawPath]);
+    await run(FFMPEG_PATH, ["-y", "-f", "concat", "-safe", "0", "-i", finalListFile, "-c", "copy", rawPath]);
 
     // --- Fadeout a negro + 3 segundos extra ---
     // La música YA está mezclada en rawPath (intro + withMusic + outro).
@@ -325,7 +326,7 @@ export async function mixComic(opts: {
     const fadeStart = Math.max(0, rawDuration - FADE_DURATION);
     const totalDuration = rawDuration + POST_BLACK_SECONDS;
 
-    await run("ffmpeg", [
+    await run(FFMPEG_PATH, [
       "-y",
       "-i", rawPath,
       "-filter_complex",

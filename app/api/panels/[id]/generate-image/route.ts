@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { prisma } from "@/lib/prisma";
+import { MEDIA_DIR } from "@/lib/paths";
 import { generateImage, imageSizeFor, IMAGE_MODEL } from "@/lib/openai";
 import { recordCost } from "@/lib/costs";
 
@@ -37,7 +38,7 @@ export async function POST(
       amountUsd: costUsd,
     });
 
-    const dir = path.join(process.cwd(), "public", "generated");
+    const dir = MEDIA_DIR;
     await mkdir(dir, { recursive: true });
     const filename = `${panel.id}-${Date.now()}.png`;
     await writeFile(path.join(dir, filename), Buffer.from(b64, "base64"));

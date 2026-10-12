@@ -320,7 +320,7 @@ export default function ComicStudio() {
       if (stopRef.current) return false;
       const task = tasks[i];
       if (runningRef.current[task.id] || fresh.jobs?.running[task.id]) continue;
-      setBatch({ kind, label: `Generando ${task.label.toLowerCase()}`, current: i + 1, total: tasks.length });
+      setBatch({ kind, label: `Generando ${task.label.charAt(0).toLowerCase()}${task.label.slice(1)}`, current: i + 1, total: tasks.length });
       setActiveId(task.id);
       try {
         await task.run();

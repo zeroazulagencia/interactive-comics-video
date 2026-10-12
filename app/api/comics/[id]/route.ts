@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { comicJobs } from "@/lib/jobs";
 
 // GET /api/comics/:id — un comic con sus escenas
 export async function GET(
@@ -18,7 +19,7 @@ export async function GET(
   if (!comic) {
     return NextResponse.json({ error: "No encontrado" }, { status: 404 });
   }
-  return NextResponse.json(comic);
+  return NextResponse.json({ ...comic, jobs: comicJobs(comic.id) });
 }
 
 // PATCH /api/comics/:id — actualiza título, prompt, estilo

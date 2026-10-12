@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { MEDIA_DIR, mediaPath } from "@/lib/paths";
 import { generateVideo, VIDEO_MODEL } from "@/lib/replicate";
 import { recordCost } from "@/lib/costs";
+import { finishJob, JOB_BUSY, startJob } from "@/lib/jobs";
 
 export const maxDuration = 300;
 
@@ -36,6 +37,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const motionStyle = panel.scene.comic.motionStyle?.trim();
   const prompt = motionStyle ? `${panel.videoPrompt}. Animation style: ${motionStyle}` : panel.videoPrompt;
 
+  if (!startJob(panel.id, panel.scene.comicId, "animacion")) {
+    return NextResponse.json(JOB_BUSY, { status: 409 });
+  }
   try {
     const imagePath = mediaPath(panel.imageUrl);
     const imageBuffer = await readFile(imagePath);
@@ -71,9 +75,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         data: { finalVideoOutdated: true },
       }),
     ]);
+    finishJob(panel.id);
     return NextResponse.json(updated);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error generando el video";
+    finishJob(panel.id, msg);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { MEDIA_DIR } from "@/lib/paths";
 import { generateImage, imageSizeFor, IMAGE_MODEL } from "@/lib/openai";
 import { recordCost } from "@/lib/costs";
+import { finishJob, JOB_BUSY, startJob } from "@/lib/jobs";
 
 export const maxDuration = 120;
 
@@ -27,6 +28,9 @@ export async function POST(
     );
   }
 
+  if (!startJob(panel.id, panel.scene.comicId, "ilustracion")) {
+    return NextResponse.json(JOB_BUSY, { status: 409 });
+  }
   try {
     const size = imageSizeFor(panel.scene.comic.aspectRatio);
     const { b64, costUsd } = await generateImage(panel.imagePrompt, size);
@@ -54,9 +58,11 @@ export async function POST(
         data: { finalVideoOutdated: true },
       }),
     ]);
+    finishJob(panel.id);
     return NextResponse.json(updated);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error generando la imagen";
+    finishJob(panel.id, msg);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

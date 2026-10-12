@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, apiGenerate, DEFAULT_VIDEO_PROMPT, findPanel, findScene, type Panel, type Scene } from "@/lib/comic";
+import { api, apiGenerate, DEFAULT_VIDEO_PROMPT, findPanel, findScene, type JobKind, type Panel, type Scene } from "@/lib/comic";
 import { Button, Notice, Spinner, inputClass, labelClass } from "@/components/ui";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -15,9 +15,8 @@ function SaveIndicator({ state }: { state: SaveState }) {
   );
 }
 
-// Generaciones en curso por escena (voz) o panel (ilustración/animación). Viven en
-// la página del proyecto para que sigan visibles al cerrar y reabrir la escena.
-export type JobKind = "voz" | "ilustracion" | "animacion";
+// Generaciones en curso por escena (voz) o panel (ilustración/animación): las del
+// servidor más las lanzadas desde esta pestaña.
 export type Jobs = {
   running: Record<string, JobKind>;
   errors: Record<string, string>;
@@ -76,7 +75,11 @@ export function SceneEditor({
       await apiGenerate(
         `/api/scenes/${scene.id}/generate-voice`,
         { method: "POST" },
-        { comicId, done: (c) => { const url = findScene(c, scene.id)?.audioUrl; return !!url && url !== before; } }
+        {
+          comicId,
+          targetId: scene.id,
+          done: (c) => { const url = findScene(c, scene.id)?.audioUrl; return !!url && url !== before; },
+        }
       );
     });
   }
@@ -207,7 +210,11 @@ function PanelEditor({
       await apiGenerate(
         `/api/panels/${panel.id}/generate-image`,
         { method: "POST" },
-        { comicId, done: (c) => { const url = findPanel(c, panel.id)?.imageUrl; return !!url && url !== before; } }
+        {
+          comicId,
+          targetId: panel.id,
+          done: (c) => { const url = findPanel(c, panel.id)?.imageUrl; return !!url && url !== before; },
+        }
       );
     });
   }
@@ -223,6 +230,7 @@ function PanelEditor({
         { method: "POST", body: { duration: 5 } },
         {
           comicId,
+          targetId: panel.id,
           done: (c) => { const url = findPanel(c, panel.id)?.videoUrl; return !!url && url !== before; },
           timeoutMs: 8 * 60_000,
         }

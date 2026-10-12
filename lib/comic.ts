@@ -19,6 +19,11 @@ export type Scene = {
   panels: Panel[];
 };
 
+export type JobKind = "voz" | "ilustracion" | "animacion" | "mezcla";
+
+// Generaciones en curso y fallos recientes, por id de escena, panel o comic.
+export type ComicJobs = { running: Record<string, JobKind>; errors: Record<string, string> };
+
 export type Comic = {
   id: string;
   title: string;
@@ -35,6 +40,7 @@ export type Comic = {
   youtubeDescription: string | null;
   youtubeTags: string | null;
   scenes: Scene[];
+  jobs?: ComicJobs;
 };
 
 // Resumen que devuelve GET /api/comics para la página de inicio.
@@ -163,33 +169,52 @@ export async function api<T = unknown>(
     body: hasBody ? JSON.stringify(opts.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((data as { error?: string }).error ?? `Error ${res.status}`);
+  if (!res.ok) throw new ApiError((data as { error?: string }).error ?? `Error ${res.status}`, res.status);
   return data as T;
 }
 
-// Conexión cortada por el navegador o el proxy ("Load failed", "Failed to fetch", 502/504).
-function isConnectionError(e: unknown): boolean {
-  return e instanceof TypeError || (e instanceof Error && /^Error 50[234]$/.test(e.message));
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number
+  ) {
+    super(message);
+  }
+}
+
+// Conexión cortada por el navegador o el proxy ("Load failed", "Failed to fetch",
+// 502/504) o generación que ya estaba en curso (409): en ambos casos se espera.
+function isRecoverable(e: unknown): boolean {
+  return e instanceof TypeError || (e instanceof ApiError && [409, 502, 503, 504].includes(e.status));
 }
 
 // Generaciones largas: si la conexión se corta antes de la respuesta, el servidor
 // sigue trabajando, así que se consulta el comic hasta que aparezca el resultado.
-// Devuelve null cuando el resultado se obtuvo consultando.
+// Con targetId, se detiene al ver un fallo registrado o si la generación ya no
+// está en curso en el servidor. Devuelve null cuando el resultado se obtuvo consultando.
 export async function apiGenerate<T = unknown>(
   url: string,
   opts: { method?: string; body?: unknown },
-  recovery: { comicId: string; done: (c: Comic) => boolean; timeoutMs?: number }
+  recovery: { comicId: string; targetId?: string; done: (c: Comic) => boolean; timeoutMs?: number }
 ): Promise<T | null> {
   try {
     return await api<T>(url, opts);
   } catch (e) {
-    if (!isConnectionError(e)) throw e;
+    if (!isRecoverable(e)) throw e;
   }
   const deadline = Date.now() + (recovery.timeoutMs ?? 5 * 60_000);
+  let missing = 0;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 4000));
     const res = await fetch(`/api/comics/${recovery.comicId}`).catch(() => null);
-    if (res?.ok && recovery.done(await res.json())) return null;
+    if (!res?.ok) continue;
+    const c: Comic = await res.json();
+    if (recovery.done(c)) return null;
+    if (!recovery.targetId) continue;
+    const failure = c.jobs?.errors[recovery.targetId];
+    if (failure) throw new Error(failure);
+    missing = c.jobs?.running[recovery.targetId] ? 0 : missing + 1;
+    if (missing >= 2) throw new Error("La generación se interrumpió. Vuelve a intentarlo.");
   }
   throw new Error("Se perdió la conexión y el resultado no llegó a tiempo. Recarga la página para ver si terminó.");
 }

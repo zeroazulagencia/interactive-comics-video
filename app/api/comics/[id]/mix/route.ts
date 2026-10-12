@@ -6,6 +6,7 @@ import { MEDIA_DIR, mediaPath } from "@/lib/paths";
 import { mixComic } from "@/lib/ffmpeg";
 import { generateMusic, MUSIC_MODEL } from "@/lib/replicate";
 import { recordCost } from "@/lib/costs";
+import { finishJob, JOB_BUSY, startJob } from "@/lib/jobs";
 import { musicPromptFor, splitSentences } from "@/lib/comic";
 
 export const maxDuration = 300;
@@ -44,6 +45,9 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     }
   }
 
+  if (!startJob(comic.id, comic.id, "mezcla")) {
+    return NextResponse.json(JOB_BUSY, { status: 409 });
+  }
   try {
     const generatedDir = MEDIA_DIR;
     await mkdir(generatedDir, { recursive: true });
@@ -96,9 +100,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         },
       },
     });
+    finishJob(comic.id);
     return NextResponse.json(updated);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error mezclando el video";
+    finishJob(comic.id, msg);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

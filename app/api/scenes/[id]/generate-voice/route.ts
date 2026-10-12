@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { MEDIA_DIR } from "@/lib/paths";
 import { generateVoice, MODEL as VOICE_MODEL } from "@/lib/replicate";
 import { recordCost } from "@/lib/costs";
+import { finishJob, JOB_BUSY, startJob } from "@/lib/jobs";
 
 export const maxDuration = 120;
 
@@ -24,6 +25,9 @@ export async function POST(
     );
   }
 
+  if (!startJob(scene.id, scene.comicId, "voz")) {
+    return NextResponse.json(JOB_BUSY, { status: 409 });
+  }
   try {
     const { url: audioSourceUrl, costUsd } = await generateVoice(scene.narration);
     await recordCost({
@@ -54,9 +58,11 @@ export async function POST(
         data: { finalVideoOutdated: true },
       }),
     ]);
+    finishJob(scene.id);
     return NextResponse.json(updated);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error generando la voz";
+    finishJob(scene.id, msg);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

@@ -3,13 +3,23 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { api, apiGenerate, comicProgress, DEFAULT_VIDEO_PROMPT, findPanel, findScene, type Comic, type Panel } from "@/lib/comic";
+import {
+  api,
+  apiGenerate,
+  comicProgress,
+  DEFAULT_VIDEO_PROMPT,
+  findPanel,
+  findScene,
+  type Comic,
+  type JobKind,
+  type Panel,
+} from "@/lib/comic";
 import { Badge, Logo, ProgressBar } from "@/components/ui";
 import { IdeaStep, type IdeaForm } from "@/components/studio/IdeaStep";
 import { StoryboardStep } from "@/components/studio/StoryboardStep";
 import { ProductionStep, type Batch, type BatchError, type TaskKind } from "@/components/studio/ProductionStep";
 import { PreviewStep } from "@/components/studio/PreviewStep";
-import type { JobKind, Jobs } from "@/components/studio/SceneEditor";
+import type { Jobs } from "@/components/studio/SceneEditor";
 
 type Step = "idea" | "storyboard" | "production" | "preview";
 
@@ -85,14 +95,26 @@ export default function ComicStudio() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Aviso al cerrar la pestaña mientras hay trabajo en curso.
-  const jobCount = Object.keys(running).length;
+  // Generaciones que el servidor tiene en curso pero esta pestaña no lanzó (p. ej.
+  // tras recargar): se consulta el comic hasta que terminen.
+  const serverJobs = comic?.jobs ?? { running: {}, errors: {} };
+  const allRunning = { ...serverJobs.running, ...running };
+  const jobCount = Object.keys(allRunning).length;
+  const orphanJobs = Object.keys(serverJobs.running).filter((k) => !running[k]).length;
   useEffect(() => {
-    if (!batch && !mixing && !generating && !jobCount) return;
+    if (!orphanJobs || batch) return;
+    const timer = setInterval(() => load(), 4000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orphanJobs, batch]);
+
+  // Aviso al cerrar la pestaña mientras hay trabajo que depende de ella.
+  useEffect(() => {
+    if (!batch && !mixing && !generating) return;
     const onUnload = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener("beforeunload", onUnload);
     return () => window.removeEventListener("beforeunload", onUnload);
-  }, [batch, mixing, generating, jobCount]);
+  }, [batch, mixing, generating]);
 
   function metaBody(f: IdeaForm) {
     return { ...f, title: f.title.trim() || "Sin título" };
@@ -157,7 +179,7 @@ export default function ComicStudio() {
   }
 
   async function runJob(targetId: string, kind: JobKind, fn: () => Promise<void>) {
-    if (runningRef.current[targetId]) return;
+    if (runningRef.current[targetId] || comic?.jobs?.running[targetId]) return;
     setRunningJobs({ ...runningRef.current, [targetId]: kind });
     setJobErrors((prev) => {
       const { [targetId]: _, ...rest } = prev;
@@ -174,7 +196,10 @@ export default function ComicStudio() {
     }
   }
 
-  const jobs: Jobs = { running, errors: jobErrors, run: runJob };
+  const allErrors = Object.fromEntries(
+    Object.entries({ ...serverJobs.errors, ...jobErrors }).filter(([k]) => !allRunning[k])
+  );
+  const jobs: Jobs = { running: allRunning, errors: allErrors, run: runJob };
 
   // ---- Producción por lotes (una tarea a la vez, desde el navegador) ----
 
@@ -197,7 +222,7 @@ export default function ComicStudio() {
             await apiGenerate(
               `/api/scenes/${s.id}/generate-voice`,
               { method: "POST" },
-              { comicId: c.id, done: (fresh) => !!findScene(fresh, s.id)?.audioUrl }
+              { comicId: c.id, targetId: s.id, done: (fresh) => !!findScene(fresh, s.id)?.audioUrl }
             );
           },
         }));
@@ -213,7 +238,7 @@ export default function ComicStudio() {
             await apiGenerate(
               `/api/panels/${panel.id}/generate-image`,
               { method: "POST" },
-              { comicId: c.id, done: (fresh) => !!findPanel(fresh, panel.id)?.imageUrl }
+              { comicId: c.id, targetId: panel.id, done: (fresh) => !!findPanel(fresh, panel.id)?.imageUrl }
             );
           },
         }));
@@ -231,7 +256,12 @@ export default function ComicStudio() {
           await apiGenerate(
             `/api/panels/${panel.id}/generate-video`,
             { method: "POST", body: { duration: 5 } },
-            { comicId: c.id, done: (fresh) => !!findPanel(fresh, panel.id)?.videoUrl, timeoutMs: 8 * 60_000 }
+            {
+              comicId: c.id,
+              targetId: panel.id,
+              done: (fresh) => !!findPanel(fresh, panel.id)?.videoUrl,
+              timeoutMs: 8 * 60_000,
+            }
           );
         },
       }));
@@ -246,7 +276,7 @@ export default function ComicStudio() {
     for (let i = 0; i < tasks.length; i++) {
       if (stopRef.current) return false;
       const task = tasks[i];
-      if (runningRef.current[task.id]) continue;
+      if (runningRef.current[task.id] || fresh.jobs?.running[task.id]) continue;
       setBatch({ kind, label: `Generando ${task.label.toLowerCase()}`, current: i + 1, total: tasks.length });
       setActiveId(task.id);
       try {
@@ -291,7 +321,12 @@ export default function ComicStudio() {
       const data = await apiGenerate<Comic>(
         `/api/comics/${id}/mix`,
         { method: "POST" },
-        { comicId: id, done: (c) => !!c.finalVideoUrl && c.finalVideoUrl !== before, timeoutMs: 10 * 60_000 }
+        {
+          comicId: id,
+          targetId: id,
+          done: (c) => !!c.finalVideoUrl && c.finalVideoUrl !== before,
+          timeoutMs: 10 * 60_000,
+        }
       );
       if (data) setComic(data);
       else await load();
@@ -441,8 +476,8 @@ export default function ComicStudio() {
         {step === "preview" && (
           <PreviewStep
             comic={comic}
-            mixing={mixing}
-            mixError={mixError}
+            mixing={mixing || serverJobs.running[comic.id] === "mezcla"}
+            mixError={mixError ?? serverJobs.errors[comic.id] ?? null}
             onMix={mix}
             onGoToProduction={() => setStep("production")}
             onChanged={() => load()}

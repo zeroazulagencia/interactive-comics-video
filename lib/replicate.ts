@@ -3,10 +3,14 @@
 // Animación con prunaai/p-video: image-to-video de alta calidad.
 // Fallback: wan-video/wan2.1-with-lora.
 
+import { musicCost, videoCost, voiceCost } from "@/lib/pricing";
+import { apiKey } from "@/lib/settings";
+
 const API = "https://api.replicate.com/v1";
-const MODEL = "minimax/speech-02-hd";
+export const MODEL = "minimax/speech-02-hd";
 // Modelo oficial de prunaai/p-video (image-to-video)
-const VIDEO_MODEL = "prunaai/p-video";
+export const VIDEO_MODEL = "prunaai/p-video";
+export const MUSIC_MODEL = "meta/musicgen";
 // Modelo comunitario (no oficial): requiere fijar el hash de versión y usar
 // POST /v1/predictions, ya que el atajo /models/{owner}/{name}/predictions
 // solo existe para modelos oficiales.
@@ -14,24 +18,32 @@ const VIDEO_MODEL_VERSION = "c48fa8ec65b13143cb552ab98ea17984eab9d70e9fe99479117
 // meta/musicgen (también comunitario, requiere version fija).
 const MUSIC_MODEL_VERSION = "671ac645ce5e552cc63a54a2bbff63fcf798043055d2dac5fc9e36a837eedcfb";
 
-export const VOICE_ID = process.env.REPLICATE_VOICE_ID ?? "Spanish_ReliableMan";
-
 // wan2.1-with-lora solo acepta estos valores de "frames" (a 16fps: ~1 a ~5s).
 export const VIDEO_FRAME_OPTIONS = [17, 33, 49, 65, 81] as const;
 export type VideoFrames = (typeof VIDEO_FRAME_OPTIONS)[number];
 
 function token(): string {
-  const t = process.env.REPLICATE_API_TOKEN;
-  if (!t) throw new Error("Falta REPLICATE_API_TOKEN en .env");
+  const t = apiKey("REPLICATE_APIKEY");
+  if (!t) throw new Error("Falta la clave de Replicate (REPLICATE_APIKEY).");
   return t;
 }
+
+type Metrics = {
+  predict_time?: number;
+  input_token_count?: number;
+  video_output_duration_seconds?: number;
+};
 
 type Prediction = {
   status: string;
   output: unknown;
   error: string | null;
+  metrics?: Metrics;
   urls: { get: string };
 };
+
+// Salida de la predicción + métricas de uso (para calcular el costo).
+type Result = { output: unknown; metrics: Metrics };
 
 // Crea una predicción y espera a que termine (polling). "Prefer: wait" bloquea
 // como máximo 60s; si el modelo tarda más, la respuesta llega en "processing"
@@ -41,25 +53,32 @@ async function createAndPoll(
   body: Record<string, unknown>,
   label: string,
   { pollMs = 3000, maxWaitMs = 5 * 60 * 1000 } = {}
-): Promise<unknown> {
+): Promise<Result> {
   let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token()}`,
-        Prefer: "wait",
-      },
-      body: JSON.stringify(body),
-    });
-  } catch (e) {
-    const cause =
-      e instanceof Error && e.cause
-        ? ` (causa: ${String((e.cause as { message?: string })?.message ?? e.cause)})`
-        : "";
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`No se pudo conectar con Replicate: ${msg}${cause}`);
+  // Con poco saldo, Replicate limita a 1 petición seguida (429 con retry_after):
+  // se espera lo indicado y se reintenta.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token()}`,
+          Prefer: "wait",
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      const cause =
+        e instanceof Error && e.cause
+          ? ` (causa: ${String((e.cause as { message?: string })?.message ?? e.cause)})`
+          : "";
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`No se pudo conectar con Replicate: ${msg}${cause}`);
+    }
+    if (res.status !== 429 || attempt >= 5) break;
+    const retryAfter = Number((await res.clone().json().catch(() => ({})))?.retry_after) || 10;
+    await new Promise((r) => setTimeout(r, (retryAfter + 1) * 1000));
   }
 
   let data: Prediction = await res.json();
@@ -82,7 +101,7 @@ async function createAndPoll(
   if (data.status !== "succeeded" || !data.output) {
     throw new Error(`Replicate (${label}) ${data.status}: ${data.error ?? "sin salida"}`);
   }
-  return data.output;
+  return { output: data.output, metrics: data.metrics ?? {} };
 }
 
 // Modelos comunitarios: requieren fijar la versión y usar POST /v1/predictions.
@@ -90,7 +109,7 @@ function runVersionAndPoll(
   version: string,
   input: Record<string, unknown>,
   opts?: { pollMs?: number; maxWaitMs?: number }
-): Promise<unknown> {
+): Promise<Result> {
   return createAndPoll(`${API}/predictions`, { version, input }, version, opts);
 }
 
@@ -99,56 +118,63 @@ function runModelAndPoll(
   model: string,
   input: Record<string, unknown>,
   opts?: { pollMs?: number; maxWaitMs?: number }
-): Promise<unknown> {
+): Promise<Result> {
   return createAndPoll(`${API}/models/${model}/predictions`, { input }, model, opts);
 }
 
-// Genera narración a partir de texto y devuelve la URL temporal del audio (mp3).
-export async function generateVoice(text: string): Promise<string> {
-  const output = await runModelAndPoll(
+// Genera narración a partir de texto y devuelve la URL temporal del audio (mp3) y su costo.
+export async function generateVoice(
+  text: string,
+  voice: { voiceId: string; speed: number }
+): Promise<{ url: string; costUsd: number }> {
+  const { output, metrics } = await runModelAndPoll(
     MODEL,
     {
       text,
-      voice_id: VOICE_ID,
+      voice_id: voice.voiceId,
       language_boost: "Spanish",
       emotion: "neutral",
-      speed: 1.15,
+      speed: voice.speed,
       audio_format: "mp3",
     },
     { maxWaitMs: 100 * 1000 }
   );
   const url = Array.isArray(output) ? output[0] : output;
   if (typeof url !== "string") throw new Error("Replicate no devolvió audio válido.");
-  return url;
+  return { url, costUsd: voiceCost(metrics.input_token_count ?? text.length) };
 }
 
 export type VideoAspectRatio = "16:9" | "9:16";
 
 // Anima una imagen con prunaai/p-video (image-to-video de alta calidad).
-// Parámetros: duración en segundos, resolución 720p, fps 24.
-// Retorna la URL pública del mp4.
+// Parámetros: duración en segundos, resolución 720p, fps 24. Con lastFrame, el
+// clip termina en esa imagen; con draft, genera una vista previa más barata.
+// Retorna la URL pública del mp4 y su costo.
 export async function generateVideo(
   imageDataUri: string,
   prompt: string,
   duration: number,
-  aspectRatio: VideoAspectRatio = "16:9"
-): Promise<string> {
-  const output = await runModelAndPoll(
+  opts: { draft?: boolean; lastFrameDataUri?: string; promptUpsampling?: boolean } = {}
+): Promise<{ url: string; costUsd: number }> {
+  const seconds = Math.max(1, Math.min(10, Math.round(duration)));
+  const { output, metrics } = await runModelAndPoll(
     VIDEO_MODEL,
     {
       image: imageDataUri,
       prompt,
-      duration: Math.max(1, Math.min(20, Math.round(duration))),
+      duration: seconds,
       fps: 24,
       resolution: "720p",
+      draft: !!opts.draft,
+      ...(opts.lastFrameDataUri ? { last_frame_image: opts.lastFrameDataUri } : {}),
       disable_safety_filter: true,
-      prompt_upsampling: true,
+      prompt_upsampling: opts.promptUpsampling ?? true,
     },
     { maxWaitMs: 270 * 1000 }
   );
   const url = Array.isArray(output) ? output[0] : output;
   if (typeof url !== "string") throw new Error("Replicate no devolvió un video válido.");
-  return url;
+  return { url, costUsd: videoCost(metrics.video_output_duration_seconds ?? seconds, opts.draft) };
 }
 
 // Fallback: wan-video/wan2.1-with-lora (modelo comunitario, requiere version hash).
@@ -158,7 +184,7 @@ export async function generateVideoFallback(
   frames: number,
   aspectRatio: VideoAspectRatio = "16:9"
 ): Promise<string> {
-  const output = await runVersionAndPoll(VIDEO_MODEL_VERSION, {
+  const { output } = await runVersionAndPoll(VIDEO_MODEL_VERSION, {
     image: imageDataUri,
     prompt,
     frames,
@@ -174,9 +200,12 @@ export async function generateVideoFallback(
   return url;
 }
 
-// Genera música instrumental de fondo (meta/musicgen) y devuelve la URL del audio.
-export async function generateMusic(prompt: string, durationSeconds: number): Promise<string> {
-  const output = await runVersionAndPoll(MUSIC_MODEL_VERSION, {
+// Genera música instrumental de fondo (meta/musicgen) y devuelve la URL del audio y su costo.
+export async function generateMusic(
+  prompt: string,
+  durationSeconds: number
+): Promise<{ url: string; costUsd: number }> {
+  const { output, metrics } = await runVersionAndPoll(MUSIC_MODEL_VERSION, {
     prompt,
     duration: durationSeconds,
     model_version: "stereo-melody-large",
@@ -185,5 +214,5 @@ export async function generateMusic(prompt: string, durationSeconds: number): Pr
   });
   const url = Array.isArray(output) ? output[0] : output;
   if (typeof url !== "string") throw new Error("Replicate no devolvió música válida.");
-  return url;
+  return { url, costUsd: musicCost(metrics.predict_time ?? 0) };
 }

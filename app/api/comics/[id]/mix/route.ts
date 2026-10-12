@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
-import { prisma } from "@/lib/prisma";
+import { comicInclude, prisma } from "@/lib/prisma";
+import { MEDIA_DIR, mediaPath } from "@/lib/paths";
 import { mixComic } from "@/lib/ffmpeg";
-import { generateMusic } from "@/lib/replicate";
+import { generateMusic, MUSIC_MODEL } from "@/lib/replicate";
+import { recordCost } from "@/lib/costs";
+import { finishJob, JOB_BUSY, startJob } from "@/lib/jobs";
+import { musicPromptFor, splitSentences } from "@/lib/comic";
 
 export const maxDuration = 300;
 
@@ -41,32 +45,30 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     }
   }
 
+  if (!startJob(comic.id, comic.id, "mezcla")) {
+    return NextResponse.json(JOB_BUSY, { status: 409 });
+  }
   try {
-    const publicDir = path.join(process.cwd(), "public");
-    const generatedDir = path.join(publicDir, "generated");
+    const generatedDir = MEDIA_DIR;
     await mkdir(generatedDir, { recursive: true });
 
     const scenes = comic.scenes.map((s) => ({
-      audioPath: path.join(publicDir, s.audioUrl!),
+      audioPath: mediaPath(s.audioUrl!),
       panelVideoPaths: [
-        path.join(publicDir, s.panels[0].videoUrl!),
-        path.join(publicDir, s.panels[1].videoUrl!),
+        mediaPath(s.panels[0].videoUrl!),
+        mediaPath(s.panels[1].videoUrl!),
       ] as [string, string],
     }));
 
     // Divide cada narración en frases (oraciones) para subtítulos secuenciales
     const subtitleChunks = comic.scenes.map((s) => {
-      const text = s.narration || "";
-      if (!text) return [""];
-      return text
-        .split(/(?<=[.!?])\s+/)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
+      const sentences = splitSentences(s.narration || "");
+      return sentences.length > 0 ? sentences : [""];
     });
 
     // Música de fondo acorde a la historia.
-    const musicPrompt = `Soft ambient instrumental, slow piano and strings, subtle and understated background music for a serious historical documentary titled "${comic.title}". Atmospheric, no drums, no vocals, calm and respectful mood.`;
-    const musicSourceUrl = await generateMusic(musicPrompt, MUSIC_SECONDS);
+    const { url: musicSourceUrl, costUsd } = await generateMusic(musicPromptFor(comic), MUSIC_SECONDS);
+    await recordCost({ comicId: comic.id, kind: "musica", provider: "replicate", model: MUSIC_MODEL, amountUsd: costUsd });
     const musicRes = await fetch(musicSourceUrl);
     if (!musicRes.ok) throw new Error("No se pudo descargar la música generada.");
     const musicBuffer = Buffer.from(await musicRes.arrayBuffer());
@@ -91,16 +93,13 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const updated = await prisma.comic.update({
       where: { id: comic.id },
       data: { finalVideoUrl, finalVideoOutdated: false },
-      include: {
-        scenes: {
-          orderBy: { order: "asc" },
-          include: { panels: { orderBy: { order: "asc" } } },
-        },
-      },
+      include: comicInclude,
     });
+    finishJob(comic.id);
     return NextResponse.json(updated);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error mezclando el video";
+    finishJob(comic.id, msg);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

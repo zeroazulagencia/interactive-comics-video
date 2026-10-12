@@ -21,3 +21,10 @@ public/generated/
 
 # OS
 .DS_Store
+
+# App de escritorio (se generan al compilar)
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/src-tauri/icons/
+desktop/src-tauri/resources/
+desktop/src-tauri/Cargo.lock

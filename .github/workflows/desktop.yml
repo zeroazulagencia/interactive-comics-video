@@ -1,0 +1,113 @@
+# Compila Narra para Mac (Apple Silicon e Intel) y publica los .dmg en GitHub Releases.
+# Se ejecuta al subir una etiqueta vX.Y.Z.
+name: App para Mac
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Crear borrador del release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft --title "Narra $GITHUB_REF_NAME" \
+              --notes "Narra para Mac. Descarga el .dmg de tu tipo de Mac (Apple Silicon: aarch64; Intel: x64)."
+
+  build:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            arch: x64
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Preparar servidor
+        run: desktop/scripts/prepare-server.sh ${{ matrix.arch }}
+
+      - name: Versión desde la etiqueta
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          jq --arg v "$VERSION" '.version = $v' desktop/src-tauri/tauri.conf.json > /tmp/conf.json
+          mv /tmp/conf.json desktop/src-tauri/tauri.conf.json
+
+      - name: Compilar app
+        working-directory: desktop
+        run: |
+          npx --yes @tauri-apps/cli@2 icon app-icon.png
+          npx --yes @tauri-apps/cli@2 build --target ${{ matrix.target }} --bundles app,dmg
+
+      - name: Verificar contenido
+        run: |
+          APP="desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Narra.app"
+          S="$APP/Contents/Resources/server"
+          test -x "$S/node" && test -x "$S/ffmpeg" && test -x "$S/ffprobe"
+          test -f "$S/server.js" && test -d "$S/.next/static" && test -f "$S/migrate.cjs"
+          test ! -e "$S/.env"
+          du -sh "$APP"
+          ls -la desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/
+
+      - name: Probar arranque del servidor
+        run: |
+          APP="$PWD/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Narra.app"
+          S="$APP/Contents/Resources/server"
+          D="$(mktemp -d)"; touch "$D/narra.db"
+          export DATABASE_URL="file:$D/narra.db" MIGRATIONS_DIR="$S/prisma/migrations" MEDIA_DIR="$D/media" \
+            ASSETS_DIR="$S/assets" FFMPEG_PATH="$S/ffmpeg" FFPROBE_PATH="$S/ffprobe" NARRA_DATA_DIR="$D" NARRA_DESKTOP=1
+          (cd "$S" && ./node migrate.cjs)
+          (cd "$S" && PORT=3999 HOSTNAME=127.0.0.1 ./node server.js > "$D/server.log" 2>&1 &)
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:3999/api/comics >/dev/null && break; sleep 1; done
+          curl -sf http://127.0.0.1:3999/api/comics
+          curl -sf http://127.0.0.1:3999/api/settings
+          curl -sf -o /dev/null http://127.0.0.1:3999/
+          "$S/ffmpeg" -hide_banner -version | head -1
+          cat "$D/server.log"
+
+      - name: Subir .dmg al release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg --clobber
+
+  publish:
+    needs: build
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publicar release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft=false --latest

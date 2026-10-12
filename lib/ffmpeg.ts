@@ -14,10 +14,11 @@ import { mkdtemp, writeFile, rm } from "fs/promises";
 import path from "path";
 import os from "os";
 import { Resvg } from "@resvg/resvg-js";
+import { ASSETS_DIR, FFMPEG_PATH, FFPROBE_PATH } from "@/lib/paths";
 
 const run = promisify(execFile);
 
-const FONT_PATH = path.join(process.cwd(), "assets", "fonts", "Montserrat-Bold.ttf");
+const FONT_PATH = path.join(ASSETS_DIR, "fonts", "Montserrat-Bold.ttf");
 const TITLE_CARD_SECONDS = 3;
 const FADE_DURATION = 2; // segundos de fadeout a negro al final
 const POST_BLACK_SECONDS = 3; // segundos extra de música sobre negro
@@ -99,8 +100,8 @@ function renderSubtitlePng(text: string, width: number, height: number): Buffer 
   return resvg.render().asPng();
 }
 
-async function ffprobeDuration(file: string): Promise<number> {
-  const { stdout } = await run("ffprobe", [
+export async function ffprobeDuration(file: string): Promise<number> {
+  const { stdout } = await run(FFPROBE_PATH, [
     "-v", "error",
     "-show_entries", "format=duration",
     "-of", "default=noprint_wrappers=1:nokey=1",
@@ -111,6 +112,28 @@ async function ffprobeDuration(file: string): Promise<number> {
     throw new Error(`No se pudo leer la duración de ${file}`);
   }
   return seconds;
+}
+
+// p-video a veces mete un cambio de plano en los primeros o últimos fotogramas
+// (sobre todo al terminar en la imagen del panel siguiente). Ese tramo dura
+// menos de un segundo y se ve como un destello: se recorta.
+const EDGE_CUT_SECONDS = 0.75;
+const CUT_SCENE_SCORE = 0.3;
+
+async function edgeTrim(file: string, duration: number): Promise<{ start: number; end: number }> {
+  const { stdout } = await run(
+    FFMPEG_PATH,
+    ["-v", "error", "-i", file, "-an", "-vf", `select='gt(scene,${CUT_SCENE_SCORE})',metadata=print:file=-`, "-f", "null", "-"],
+    { maxBuffer: 10 * 1024 * 1024 }
+  );
+  const cuts = [...stdout.matchAll(/pts_time:([\d.]+)/g)].map((m) => parseFloat(m[1]));
+  let start = 0;
+  let end = duration;
+  for (const t of cuts) {
+    if (t <= EDGE_CUT_SECONDS) start = Math.max(start, t);
+    else if (t >= duration - EDGE_CUT_SECONDS) end = Math.min(end, t);
+  }
+  return { start, end };
 }
 
 function resolutionFor(aspectRatio: string): { width: number; height: number } {
@@ -154,13 +177,14 @@ export async function mixComic(opts: {
       for (let p = 0; p < 2; p++) {
         const videoPath = panelVideoPaths[p];
         const videoDuration = await ffprobeDuration(videoPath);
-        const factor = halfDuration / videoDuration;
+        const { start, end } = await edgeTrim(videoPath, videoDuration);
+        const factor = halfDuration / (end - start);
         const partPath = path.join(tmpDir, `s${i}-p${p}.mp4`);
-        await run("ffmpeg", [
+        await run(FFMPEG_PATH, [
           "-y",
           "-i", videoPath,
           "-vf",
-          `setpts=${factor}*PTS,scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},fps=24,format=yuv420p`,
+          `trim=start=${start}:end=${end},setpts=PTS-STARTPTS,setpts=${factor}*PTS,scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},fps=24,format=yuv420p`,
           "-an",
           "-t", String(halfDuration),
           "-c:v", "libx264",
@@ -175,7 +199,7 @@ export async function mixComic(opts: {
       const panelListFile = path.join(tmpDir, `s${i}-list.txt`);
       await writeFile(panelListFile, panelParts.map((p) => `file '${p}'`).join("\n"));
       const sceneVideoOnly = path.join(tmpDir, `s${i}-video.mp4`);
-      await run("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", panelListFile, "-c", "copy", sceneVideoOnly]);
+      await run(FFMPEG_PATH, ["-y", "-f", "concat", "-safe", "0", "-i", panelListFile, "-c", "copy", sceneVideoOnly]);
 
       // --- Mezclar video + audio (y subtítulos si están activados) ---
       // Nota: los paneles de p-video traen audio ambiental pero se descarta
@@ -216,7 +240,7 @@ export async function mixComic(opts: {
           }
         }
 
-        await run("ffmpeg", [
+        await run(FFMPEG_PATH, [
           ...ffmpegInputs,
           "-filter_complex",
           `${filterChain}`,
@@ -234,7 +258,7 @@ export async function mixComic(opts: {
         ]);
       } else {
         // Sin subtítulos: solo video + audio de narración
-        await run("ffmpeg", [
+        await run(FFMPEG_PATH, [
           "-y",
           "-i", sceneVideoOnly,
           "-i", audioPath,
@@ -258,12 +282,12 @@ export async function mixComic(opts: {
     const narratedListFile = path.join(tmpDir, "narrated-list.txt");
     await writeFile(narratedListFile, sceneParts.map((p) => `file '${p}'`).join("\n"));
     const narratedPath = path.join(tmpDir, "narrated.mp4");
-    await run("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", narratedListFile, "-c", "copy", narratedPath]);
+    await run(FFMPEG_PATH, ["-y", "-f", "concat", "-safe", "0", "-i", narratedListFile, "-c", "copy", narratedPath]);
     const narratedDuration = await ffprobeDuration(narratedPath);
 
     // --- Música de fondo en loop, a bajo volumen ---
     const withMusicPath = path.join(tmpDir, "with-music.mp4");
-    await run("ffmpeg", [
+    await run(FFMPEG_PATH, [
       "-y",
       "-i", narratedPath,
       "-stream_loop", "-1",
@@ -288,7 +312,7 @@ export async function mixComic(opts: {
     const introPath = path.join(tmpDir, "intro.mp4");
     const outroPath = path.join(tmpDir, "outro.mp4");
     for (const cardPath of [introPath, outroPath]) {
-      await run("ffmpeg", [
+      await run(FFMPEG_PATH, [
         "-y",
         "-loop", "1",
         "-i", titleCardPng,
@@ -316,7 +340,7 @@ export async function mixComic(opts: {
       finalListFile,
       [introPath, withMusicPath, outroPath].map((p) => `file '${p}'`).join("\n")
     );
-    await run("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", finalListFile, "-c", "copy", rawPath]);
+    await run(FFMPEG_PATH, ["-y", "-f", "concat", "-safe", "0", "-i", finalListFile, "-c", "copy", rawPath]);
 
     // --- Fadeout a negro + 3 segundos extra ---
     // La música YA está mezclada en rawPath (intro + withMusic + outro).
@@ -325,7 +349,7 @@ export async function mixComic(opts: {
     const fadeStart = Math.max(0, rawDuration - FADE_DURATION);
     const totalDuration = rawDuration + POST_BLACK_SECONDS;
 
-    await run("ffmpeg", [
+    await run(FFMPEG_PATH, [
       "-y",
       "-i", rawPath,
       "-filter_complex",

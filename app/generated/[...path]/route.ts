@@ -2,12 +2,13 @@ import { createReadStream } from "fs";
 import { stat } from "fs/promises";
 import path from "path";
 import { Readable } from "stream";
+import { MEDIA_DIR } from "@/lib/paths";
 
 export const dynamic = "force-dynamic";
 
 // GET /generated/* — sirve los archivos generados en runtime. `next start` solo
 // sirve los archivos de public/ que existían al hacer el build.
-const GENERATED_DIR = path.join(process.cwd(), "public", "generated");
+const GENERATED_DIR = MEDIA_DIR;
 
 const MIME: Record<string, string> = {
   ".png": "image/png",

@@ -17,14 +17,50 @@ model Comic {
   subtitlesEnabled Boolean @default(true) // subtítulos activados/desactivados
   prompt        String? // idea/historia inicial
   artStyle      String? // estilo de ilustración (se aplica a todas las escenas)
+  motionStyle   String? // tipo de animación (se añade al prompt de cada clip)
+  voiceId       String   @default("Spanish_ReliableMan") // voz del narrador (minimax/speech-02-hd)
+  voiceSpeed    Float    @default(1.15) // velocidad de la narración (0.8 a 1.4)
+  videoDuration Int      @default(0) // segundos por clip; 0 = automática según la narración
+  videoTransition Boolean @default(false) // el clip del panel 1 termina en la imagen del panel 2
+  animateCharacters Boolean @default(false) // permite movimiento sutil de los personajes
   aspectRatio   String   @default("horizontal") // "horizontal" (16:9, YouTube) | "vertical" (9:16, Instagram/Reels)
   coverImage    String?
   published     Boolean  @default(false)
   finalVideoUrl String? // mp4 final: escenas + narración + música + títulos, mezclado con ffmpeg
   finalVideoOutdated Boolean @default(false) // true si cambió algo después de la última mezcla
+  musicPrompt        String? // prompt de la música de fondo, acorde a la historia
+  youtubeTitle       String? // título sugerido para publicar en YouTube
+  youtubeDescription String? // descripción para YouTube
+  youtubeTags        String? // etiquetas separadas por comas
   scenes        Scene[]
+  characters    Character[]
+  costs         Cost[]
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+// Costo de cada llamada a OpenAI/Replicate. Se conserva aunque se borre el
+// proyecto (comicId queda en null) para descontarlo del saldo.
+model Cost {
+  id        String   @id @default(cuid())
+  comic     Comic?   @relation(fields: [comicId], references: [id], onDelete: SetNull)
+  comicId   String?
+  kind      String // guion | voz | ilustracion | animacion | musica | youtube
+  provider  String // openai | replicate
+  model     String
+  amountUsd Float
+  createdAt DateTime @default(now())
+
+  @@index([comicId])
+  @@index([provider, createdAt])
+}
+
+// Saldo ingresado a mano por proveedor; el saldo estimado descuenta los
+// costos registrados desde setAt.
+model ApiBalance {
+  provider  String   @id // openai | replicate
+  amountUsd Float
+  setAt     DateTime @default(now())
 }
 
 model Scene {
@@ -36,6 +72,7 @@ model Scene {
   summary   String? // qué sucede en la escena (breve)
   narration String? // locución / texto narrativo, hasta ~3 párrafos
   audioUrl  String? // narración generada con Replicate (minimax/speech-02-hd)
+  audioVoice String? // voz y velocidad con que se generó (p. ej. "Spanish_Narrator@1.15")
   panels    Panel[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -51,9 +88,29 @@ model Panel {
   imagePrompt String? // prompt muy detallado de la ilustración
   imageUrl    String? // se rellena al generar con gpt-image-1
   videoPrompt String? // descripción del movimiento a animar en la imagen
-  videoUrl    String? // animación generada con Replicate (wan-video/wan2.1-with-lora)
+  videoUrl    String? // animación generada con Replicate (prunaai/p-video)
+  videoDraft  Boolean  @default(false) // la animación actual es un borrador (calidad baja)
+  duration    Int? // segundos del clip; null = el valor del proyecto
+  characters  Character[] // personajes del elenco que aparecen en el panel
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([sceneId])
+}
+
+// Personaje (o elemento recurrente) del elenco. Su retrato se envía como
+// referencia al ilustrar los paneles donde aparece, para mantener su aspecto.
+model Character {
+  id          String   @id @default(cuid())
+  comic       Comic    @relation(fields: [comicId], references: [id], onDelete: Cascade)
+  comicId     String
+  order       Int      @default(0)
+  name        String
+  description String   @default("") // aspecto visual fijo (inglés)
+  imageUrl    String? // retrato de referencia
+  panels      Panel[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([comicId])
 }

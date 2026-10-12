@@ -35,4 +35,10 @@ npm run dev           # http://localhost:3000
 
 ## Variables de entorno
 
-Ver `.env.example`. El `.env` incluye `OPENAI_API_KEY` y `DATABASE_URL`.
+Ver `.env.example`. El `.env` incluye `OPENAI_APIKEY` y `DATABASE_URL`.
+
+## App para Mac
+
+La carpeta `desktop/` empaqueta el estudio como app de Mac con [Tauri](https://tauri.app): una ventana nativa que arranca el servidor de Next.js incluido (con Node, ffmpeg y ffprobe). Los datos se guardan en `~/Library/Application Support/com.zeroazul.narra/` y las claves de API se configuran desde **Ajustes**.
+
+Para publicar una versión, sube una etiqueta `vX.Y.Z`. El flujo `.github/workflows/desktop.yml` compila los `.dmg` (Apple Silicon e Intel) y los publica en GitHub Releases; el botón **Descargar app** del inicio enlaza a la última versión.

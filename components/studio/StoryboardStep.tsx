@@ -1,0 +1,281 @@
+"use client";
+
+import { comicProgress, missingPortraits, outdatedVoices, sceneProgress, type Comic, type Scene } from "@/lib/comic";
+import { Badge, Button, Notice, Sheet, Spinner } from "@/components/ui";
+import { SceneEditor, type Jobs } from "./SceneEditor";
+import type { Batch, TaskKind } from "./ProductionStep";
+
+export function StoryboardStep({
+  comic,
+  activeId,
+  openSceneId,
+  onOpenScene,
+  onChanged,
+  onGoToIdea,
+  batch,
+  stopping,
+  errorCount,
+  onRun,
+  onStop,
+  onGoToProduction,
+  onGoToCast,
+  jobs,
+}: {
+  comic: Comic;
+  activeId: string | null;
+  openSceneId: string | null;
+  onOpenScene: (id: string | null) => void;
+  onChanged: () => void;
+  onGoToIdea: () => void;
+  batch: Batch | null;
+  stopping: boolean;
+  errorCount: number;
+  onRun: (kind: TaskKind) => void;
+  onStop: () => void;
+  onGoToProduction: () => void;
+  onGoToCast: () => void;
+  jobs: Jobs;
+}) {
+  const vertical = comic.aspectRatio === "vertical";
+  const openIndex = comic.scenes.findIndex((s) => s.id === openSceneId);
+  const openScene = openIndex >= 0 ? comic.scenes[openIndex] : null;
+
+  if (comic.scenes.length === 0) {
+    return (
+      <div className="mx-auto flex max-w-md flex-col items-center gap-4 py-24 text-center">
+        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/10 text-2xl text-accent ring-1 ring-accent/20">✦</span>
+        <h2 className="text-2xl font-semibold tracking-tight">Todavía no hay escenas</h2>
+        <p className="text-ink-2">Escribe la historia y elige un estilo; el estudio crea el storyboard por ti.</p>
+        <Button variant="primary" size="lg" onClick={onGoToIdea}>
+          Ir a la idea
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <BatchBar comic={comic} batch={batch} stopping={stopping} onRun={onRun} onStop={onStop} />
+      {!batch && missingPortraits(comic).length > 0 && (
+        <div className="mb-6">
+          <Notice tone="warn">
+            Faltan {missingPortraits(comic).length} retratos del elenco. Se generan antes de las ilustraciones, o puedes
+            revisarlos primero en el{" "}
+            <button type="button" className="font-semibold underline" onClick={onGoToCast}>
+              Elenco
+            </button>
+            .
+          </Notice>
+        </div>
+      )}
+      {errorCount > 0 && !batch && (
+        <div className="mb-6">
+          <Notice tone="error">
+            {errorCount} {errorCount === 1 ? "tarea falló" : "tareas fallaron"}.{" "}
+            <button type="button" className="font-semibold underline" onClick={onGoToProduction}>
+              Ver detalles
+            </button>
+          </Notice>
+        </div>
+      )}
+      <div
+        className={`grid gap-6 ${
+          vertical ? "grid-cols-2 md:grid-cols-3 lg:grid-cols-4" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+        }`}
+      >
+        {comic.scenes.map((scene, i) => (
+          <SceneTile
+            key={scene.id}
+            scene={scene}
+            index={i}
+            vertical={vertical}
+            activeId={activeId}
+            running={jobs.running}
+            onClick={() => onOpenScene(scene.id)}
+          />
+        ))}
+      </div>
+
+      <Sheet
+        open={!!openScene}
+        onClose={() => onOpenScene(null)}
+        header={
+          openScene && (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-label="Escena anterior"
+                disabled={openIndex <= 0}
+                onClick={() => onOpenScene(comic.scenes[openIndex - 1].id)}
+              >
+                ‹
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-label="Escena siguiente"
+                disabled={openIndex >= comic.scenes.length - 1}
+                onClick={() => onOpenScene(comic.scenes[openIndex + 1].id)}
+              >
+                ›
+              </Button>
+              <span className="ml-2 truncate text-[15px] font-semibold">
+                Escena {openIndex + 1} <span className="font-normal text-ink-3">de {comic.scenes.length}</span>
+              </span>
+            </div>
+          )
+        }
+      >
+        {openScene && (
+          <SceneEditor
+            key={openScene.id}
+            comic={comic}
+            jobs={jobs}
+            scene={openScene}
+            activeId={activeId}
+            onChanged={onChanged}
+            onDeleted={() => {
+              onOpenScene(null);
+              onChanged();
+            }}
+          />
+        )}
+      </Sheet>
+    </>
+  );
+}
+
+// Genera en lote, por tipo, lo que falta en todas las escenas.
+function BatchBar({
+  comic,
+  batch,
+  stopping,
+  onRun,
+  onStop,
+}: {
+  comic: Comic;
+  batch: Batch | null;
+  stopping: boolean;
+  onRun: (kind: TaskKind) => void;
+  onStop: () => void;
+}) {
+  const p = comicProgress(comic);
+  const outdated = outdatedVoices(comic).length;
+  const actions: { kind: TaskKind; label: string; pending: number; done: string }[] = [
+    { kind: "voces", label: "Generar todas las voces", pending: p.scenes - p.voices, done: "Voces listas" },
+    ...(outdated > 0
+      ? [{ kind: "revoces" as const, label: "Rehacer voces con la voz nueva", pending: outdated, done: "" }]
+      : []),
+    {
+      kind: "ilustraciones",
+      label: "Generar todas las ilustraciones",
+      pending: p.panels - p.images,
+      done: "Ilustraciones listas",
+    },
+    { kind: "animaciones", label: "Animar todas", pending: p.images - p.videos, done: "Animaciones listas" },
+  ];
+
+  return (
+    <div className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl bg-surface p-4 ring-1 ring-white/[0.07]">
+      {batch ? (
+        <>
+          <Spinner className="h-4 w-4 text-accent" />
+          <span className="min-w-0 flex-1 truncate text-[14px]">
+            {batch.label} <span className="tabular-nums text-ink-3">· {batch.current} de {batch.total}</span>
+          </span>
+          <Button variant="secondary" size="sm" onClick={onStop} loading={stopping}>
+            {stopping ? "Deteniendo…" : "Detener"}
+          </Button>
+        </>
+      ) : (
+        <>
+          <span className="mr-auto text-[14px] font-medium text-ink-2">Generar en lote</span>
+          {actions.map((a) => (
+            <Button
+              key={a.kind}
+              variant={a.pending > 0 && a.kind !== "animaciones" ? "primary" : "secondary"}
+              size="sm"
+              disabled={a.pending <= 0}
+              onClick={() => onRun(a.kind)}
+            >
+              {a.pending > 0 ? `${a.label} (${a.pending})` : `✓ ${a.done}`}
+            </Button>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+function SceneTile({
+  scene,
+  index,
+  vertical,
+  activeId,
+  running,
+  onClick,
+}: {
+  scene: Scene;
+  index: number;
+  vertical: boolean;
+  activeId: string | null;
+  running: Jobs["running"];
+  onClick: () => void;
+}) {
+  const p = sceneProgress(scene);
+  const working = [scene.id, ...scene.panels.map((panel) => panel.id)].some((id) => id === activeId || !!running[id]);
+  const tone = (done: boolean, partial = false) => (done ? "done" : partial ? "working" : "pending") as "done" | "working" | "pending";
+
+  return (
+    <button
+      onClick={onClick}
+      className="group overflow-hidden rounded-2xl bg-surface text-left ring-1 ring-white/[0.07] transition duration-300 hover:-translate-y-1 hover:ring-white/[0.16] hover:shadow-[0_30px_60px_-30px_rgba(0,0,0,0.9)] focus:outline-none focus-visible:ring-4 focus-visible:ring-accent/30"
+    >
+      <div className="relative grid grid-cols-2 gap-px bg-white/[0.06]">
+        {[0, 1].map((k) => {
+          const panel = scene.panels[k];
+          return (
+            <div key={k} className={`${vertical ? "aspect-[9/16]" : "aspect-video"} overflow-hidden bg-surface-2`}>
+              {panel?.imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={panel.imageUrl}
+                  alt=""
+                  loading="lazy"
+                  className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]"
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center text-[11px] text-ink-3">Panel {k + 1}</div>
+              )}
+            </div>
+          );
+        })}
+        <span className="absolute left-3 top-3 rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-semibold tabular-nums backdrop-blur-md">
+          {String(index + 1).padStart(2, "0")}
+        </span>
+        {working && (
+          <span className="absolute right-3 top-3">
+            <Badge tone="working">Generando</Badge>
+          </span>
+        )}
+      </div>
+      <div className="p-5">
+        <h3 className="truncate text-[16px] font-semibold tracking-tight">{scene.title || `Escena ${index + 1}`}</h3>
+        <p className="mt-1 line-clamp-2 min-h-[2.6em] text-[13px] leading-[1.3] text-ink-2">
+          {scene.narration || "Sin narración"}
+        </p>
+        <div className="mt-4 flex flex-wrap gap-1.5">
+          <Badge tone={tone(p.voice)}>Voz</Badge>
+          <Badge tone={tone(p.images === p.panels && p.panels > 0, p.images > 0)}>
+            Ilustración {p.images}/{p.panels}
+          </Badge>
+          <Badge tone={tone(p.videos === p.panels && p.panels > 0, p.videos > 0)}>
+            Animación {p.videos}/{p.panels}
+          </Badge>
+          {scene.panels.some((panel) => panel.videoUrl && panel.videoDraft) && <Badge tone="warn">Borrador</Badge>}
+        </div>
+      </div>
+    </button>
+  );
+}

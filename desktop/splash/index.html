@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Narra</title>
+    <style>
+      html, body { height: 100%; margin: 0; }
+      body {
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+        background: radial-gradient(60% 40% at 50% 0%, rgba(255, 178, 36, 0.12), transparent 70%), #09090b;
+        color: #f5f5f7; font: 15px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+        -webkit-user-select: none; user-select: none;
+      }
+      .mark {
+        width: 64px; height: 64px; border-radius: 18px; display: flex; align-items: center; justify-content: center;
+        background: linear-gradient(135deg, #ffd27a, #ffb224 50%, #ff5e3a);
+        box-shadow: 0 10px 40px -8px rgba(255, 140, 40, 0.8);
+        animation: pulse 1.6s ease-in-out infinite;
+      }
+      @keyframes pulse { 50% { transform: scale(0.94); opacity: 0.85; } }
+      h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+      p { margin: 0; color: #a1a1aa; }
+      #error { display: none; max-width: 420px; text-align: center; color: #fca5a5; }
+      #error code { color: #a1a1aa; font-size: 12px; word-break: break-all; }
+    </style>
+  </head>
+  <body>
+    <div class="mark">
+      <svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true">
+        <path d="M5 5.5v13l7.5-6.5z" fill="#1a1204" />
+        <path d="M13 8.5l6-3v13l-6-3z" fill="#1a1204" opacity="0.55" />
+      </svg>
+    </div>
+    <h1>Narra</h1>
+    <p id="status">Abriendo el estudio…</p>
+    <p id="error"></p>
+    <script>
+      function showError(message, logPath) {
+        document.querySelector(".mark").style.animation = "none";
+        document.getElementById("status").style.display = "none";
+        const el = document.getElementById("error");
+        el.style.display = "block";
+        el.textContent = message + " Detalles en: ";
+        const code = document.createElement("code");
+        code.textContent = logPath;
+        el.appendChild(code);
+      }
+    </script>
+  </body>
+</html>

@@ -1,1 +1,67 @@
 @import "tailwindcss";
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --color-ink: #f5f5f7;
+  --color-ink-2: #a1a1aa;
+  --color-ink-3: #71717a;
+  --color-canvas: #09090b;
+  --color-surface: #121216;
+  --color-surface-2: #1a1a20;
+  --color-accent: #ffb224;
+  --color-accent-hover: #ffc54d;
+  --color-on-accent: #1a1204;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+/* Brillo cálido de fondo, fijo detrás del contenido. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 40% at 50% -10%, rgba(255, 178, 36, 0.10), transparent 70%),
+    radial-gradient(40% 30% at 90% 10%, rgba(255, 94, 58, 0.06), transparent 70%);
+}
+
+::selection {
+  background: rgba(255, 178, 36, 0.35);
+}
+
+.text-brand {
+  background: linear-gradient(100deg, #ffd27a 0%, #ffb224 40%, #ff5e3a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@keyframes sheet-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.97) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes kenburns {
+  from { transform: scale(1); }
+  to { transform: scale(1.08); }
+}
+
+.animate-sheet-in { animation: sheet-in 0.36s cubic-bezier(0.32, 0.72, 0, 1); }
+.animate-fade-in { animation: fade-in 0.2s ease-out; }
+.animate-pop-in { animation: pop-in 0.28s cubic-bezier(0.32, 0.72, 0, 1); }
+.animate-rise-in { animation: rise-in 0.5s cubic-bezier(0.32, 0.72, 0, 1) both; }

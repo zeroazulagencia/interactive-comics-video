@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, DEFAULT_VIDEO_PROMPT, type Panel, type Scene } from "@/lib/comic";
+import { api, apiGenerate, DEFAULT_VIDEO_PROMPT, findPanel, findScene, type Panel, type Scene } from "@/lib/comic";
 import { Button, Notice, Spinner, inputClass, labelClass } from "@/components/ui";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -20,12 +20,14 @@ function errMsg(e: unknown, fallback: string) {
 }
 
 export function SceneEditor({
+  comicId,
   scene,
   aspectRatio,
   activeId,
   onChanged,
   onDeleted,
 }: {
+  comicId: string;
   scene: Scene;
   aspectRatio: string;
   activeId: string | null;
@@ -61,7 +63,12 @@ export function SceneEditor({
       if (narration !== (scene.narration ?? "")) {
         await api(`/api/scenes/${scene.id}`, { method: "PATCH", body: { narration } });
       }
-      await api(`/api/scenes/${scene.id}/generate-voice`, { method: "POST" });
+      const before = scene.audioUrl;
+      await apiGenerate(
+        `/api/scenes/${scene.id}/generate-voice`,
+        { method: "POST" },
+        { comicId, done: (c) => { const url = findScene(c, scene.id)?.audioUrl; return !!url && url !== before; } }
+      );
       onChanged();
     } catch (e) {
       setErr(errMsg(e, "Error generando la voz"));
@@ -134,6 +141,7 @@ export function SceneEditor({
       {scene.panels.map((panel) => (
         <PanelEditor
           key={panel.id}
+          comicId={comicId}
           panel={panel}
           aspectRatio={aspectRatio}
           busy={activeId === panel.id}
@@ -149,11 +157,13 @@ export function SceneEditor({
 }
 
 function PanelEditor({
+  comicId,
   panel,
   aspectRatio,
   busy,
   onChanged,
 }: {
+  comicId: string;
   panel: Panel;
   aspectRatio: string;
   busy: boolean;
@@ -185,7 +195,12 @@ function PanelEditor({
     setGenImg(true);
     try {
       await api(`/api/panels/${panel.id}`, { method: "PATCH", body: { imagePrompt } });
-      await api(`/api/panels/${panel.id}/generate-image`, { method: "POST" });
+      const before = panel.imageUrl;
+      await apiGenerate(
+        `/api/panels/${panel.id}/generate-image`,
+        { method: "POST" },
+        { comicId, done: (c) => { const url = findPanel(c, panel.id)?.imageUrl; return !!url && url !== before; } }
+      );
       onChanged();
     } catch (e) {
       setErr(errMsg(e, "Error generando la imagen"));
@@ -199,7 +214,16 @@ function PanelEditor({
     setGenVideo(true);
     try {
       await api(`/api/panels/${panel.id}`, { method: "PATCH", body: { videoPrompt } });
-      await api(`/api/panels/${panel.id}/generate-video`, { method: "POST", body: { duration: 5 } });
+      const before = panel.videoUrl;
+      await apiGenerate(
+        `/api/panels/${panel.id}/generate-video`,
+        { method: "POST", body: { duration: 5 } },
+        {
+          comicId,
+          done: (c) => { const url = findPanel(c, panel.id)?.videoUrl; return !!url && url !== before; },
+          timeoutMs: 8 * 60_000,
+        }
+      );
       onChanged();
     } catch (e) {
       setErr(errMsg(e, "Error generando la animación"));

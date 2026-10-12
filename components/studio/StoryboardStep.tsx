@@ -1,8 +1,9 @@
 "use client";
 
-import { sceneProgress, type Comic, type Scene } from "@/lib/comic";
-import { Badge, Button, Sheet } from "@/components/ui";
+import { comicProgress, sceneProgress, type Comic, type Scene } from "@/lib/comic";
+import { Badge, Button, Notice, Sheet, Spinner } from "@/components/ui";
 import { SceneEditor } from "./SceneEditor";
+import type { Batch, TaskKind } from "./ProductionStep";
 
 export function StoryboardStep({
   comic,
@@ -11,6 +12,12 @@ export function StoryboardStep({
   onOpenScene,
   onChanged,
   onGoToIdea,
+  batch,
+  stopping,
+  errorCount,
+  onRun,
+  onStop,
+  onGoToProduction,
 }: {
   comic: Comic;
   activeId: string | null;
@@ -18,6 +25,12 @@ export function StoryboardStep({
   onOpenScene: (id: string | null) => void;
   onChanged: () => void;
   onGoToIdea: () => void;
+  batch: Batch | null;
+  stopping: boolean;
+  errorCount: number;
+  onRun: (kind: TaskKind) => void;
+  onStop: () => void;
+  onGoToProduction: () => void;
 }) {
   const vertical = comic.aspectRatio === "vertical";
   const openIndex = comic.scenes.findIndex((s) => s.id === openSceneId);
@@ -38,6 +51,17 @@ export function StoryboardStep({
 
   return (
     <>
+      <BatchBar comic={comic} batch={batch} stopping={stopping} onRun={onRun} onStop={onStop} />
+      {errorCount > 0 && !batch && (
+        <div className="mb-6">
+          <Notice tone="error">
+            {errorCount} {errorCount === 1 ? "tarea falló" : "tareas fallaron"}.{" "}
+            <button type="button" className="font-semibold underline" onClick={onGoToProduction}>
+              Ver detalles
+            </button>
+          </Notice>
+        </div>
+      )}
       <div
         className={`grid gap-6 ${
           vertical ? "grid-cols-2 md:grid-cols-3 lg:grid-cols-4" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
@@ -89,6 +113,7 @@ export function StoryboardStep({
         {openScene && (
           <SceneEditor
             key={openScene.id}
+            comicId={comic.id}
             scene={openScene}
             aspectRatio={comic.aspectRatio}
             activeId={activeId}
@@ -101,6 +126,64 @@ export function StoryboardStep({
         )}
       </Sheet>
     </>
+  );
+}
+
+// Genera en lote, por tipo, lo que falta en todas las escenas.
+function BatchBar({
+  comic,
+  batch,
+  stopping,
+  onRun,
+  onStop,
+}: {
+  comic: Comic;
+  batch: Batch | null;
+  stopping: boolean;
+  onRun: (kind: TaskKind) => void;
+  onStop: () => void;
+}) {
+  const p = comicProgress(comic);
+  const actions: { kind: TaskKind; label: string; pending: number; done: string }[] = [
+    { kind: "voces", label: "Generar todas las voces", pending: p.scenes - p.voices, done: "Voces listas" },
+    {
+      kind: "ilustraciones",
+      label: "Generar todas las ilustraciones",
+      pending: p.panels - p.images,
+      done: "Ilustraciones listas",
+    },
+    { kind: "animaciones", label: "Animar todas", pending: p.images - p.videos, done: "Animaciones listas" },
+  ];
+
+  return (
+    <div className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl bg-surface p-4 ring-1 ring-white/[0.07]">
+      {batch ? (
+        <>
+          <Spinner className="h-4 w-4 text-accent" />
+          <span className="min-w-0 flex-1 truncate text-[14px]">
+            {batch.label} <span className="tabular-nums text-ink-3">· {batch.current} de {batch.total}</span>
+          </span>
+          <Button variant="secondary" size="sm" onClick={onStop} loading={stopping}>
+            {stopping ? "Deteniendo…" : "Detener"}
+          </Button>
+        </>
+      ) : (
+        <>
+          <span className="mr-auto text-[14px] font-medium text-ink-2">Generar en lote</span>
+          {actions.map((a) => (
+            <Button
+              key={a.kind}
+              variant={a.pending > 0 && a.kind !== "animaciones" ? "primary" : "secondary"}
+              size="sm"
+              disabled={a.pending <= 0}
+              onClick={() => onRun(a.kind)}
+            >
+              {a.pending > 0 ? `${a.label} (${a.pending})` : `✓ ${a.done}`}
+            </Button>
+          ))}
+        </>
+      )}
+    </div>
   );
 }
 

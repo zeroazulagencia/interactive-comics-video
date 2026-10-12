@@ -35,85 +35,83 @@ export function IdeaStep({
   onDelete: () => void;
 }) {
   return (
-    <div className="mx-auto grid max-w-5xl grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
-      <div className="flex flex-col gap-6">
-        <Card className="p-8">
-          <input
-            className="mb-1 w-full border-0 bg-transparent p-0 text-3xl font-semibold tracking-[-0.02em] outline-none placeholder:text-ink-3"
-            placeholder="Título del proyecto"
-            value={form.title}
-            onChange={(e) => onChange({ title: e.target.value })}
-          />
-          <p className="mb-8 text-[13px] text-ink-3">
-            {aspectRatio === "vertical" ? "Vertical · 9:16" : "Horizontal · 16:9"}
+    <div className="mx-auto flex max-w-3xl flex-col gap-6">
+      <Card className="p-8">
+        <input
+          className="mb-1 w-full border-0 bg-transparent p-0 text-3xl font-semibold tracking-[-0.02em] outline-none placeholder:text-ink-3"
+          placeholder="Título del proyecto"
+          value={form.title}
+          onChange={(e) => onChange({ title: e.target.value })}
+        />
+        <p className="mb-8 text-[13px] text-ink-3">
+          {aspectRatio === "vertical" ? "Vertical · 9:16" : "Horizontal · 16:9"}
+        </p>
+
+        <label className={labelClass}>La historia</label>
+        <textarea
+          className={`${inputClass} min-h-[160px] resize-y leading-relaxed`}
+          placeholder="Describe la idea: quién, dónde, qué pasa y el tono que buscas…"
+          value={form.prompt}
+          onChange={(e) => onChange({ prompt: e.target.value })}
+        />
+        <p className="mt-2 text-[12px] text-ink-3">El estudio la divide en unas 10 escenas con narración e ilustraciones.</p>
+      </Card>
+
+      <Card className="p-8">
+        <h3 className="mb-1 text-[17px] font-semibold tracking-tight">Estilo del video</h3>
+        <p className="mb-5 text-[13px] text-ink-2">
+          Define cómo se ven las ilustraciones y cómo se animan. Pasa el mouse sobre un estilo para ver su animación.
+        </p>
+        <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {VIDEO_STYLES.map((p) => (
+            <StyleCard
+              key={p.id}
+              style={p}
+              active={form.artStyle.trim() === p.artStyle && form.motionStyle.trim() === p.motionStyle}
+              onSelect={() => onChange({ artStyle: p.artStyle, motionStyle: p.motionStyle })}
+            />
+          ))}
+        </div>
+        <label className={labelClass}>Estilo gráfico</label>
+        <textarea
+          className={`${inputClass} mb-4 resize-y`}
+          rows={2}
+          placeholder="Elige un estilo o descríbelo con tus palabras…"
+          value={form.artStyle}
+          onChange={(e) => onChange({ artStyle: e.target.value })}
+        />
+        <label className={labelClass}>Tipo de animación</label>
+        <textarea
+          className={`${inputClass} resize-y`}
+          rows={2}
+          placeholder="Cómo se mueve la cámara y la escena (en inglés)…"
+          value={form.motionStyle}
+          onChange={(e) => onChange({ motionStyle: e.target.value })}
+        />
+        <p className="mt-2 text-[12px] text-ink-3">Se aplica a cada animación, también a las que vuelvas a generar.</p>
+      </Card>
+
+      <div className="sticky bottom-4 z-30 flex flex-col gap-3">
+        {generating && <Notice>Escribiendo las escenas; puede tardar hasta un minuto.</Notice>}
+        {error && <Notice tone="error">{error}</Notice>}
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-surface-2/90 p-4 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.9)] ring-1 ring-white/[0.1] backdrop-blur-xl">
+          <p className="min-w-0 flex-1 text-[12px] text-ink-3">
+            {sceneCount > 0
+              ? "Los cambios en la historia o el estilo gráfico solo se aplican al regenerar las escenas."
+              : "Escribe la historia, elige un estilo y genera las escenas."}
           </p>
-
-          <label className={labelClass}>La historia</label>
-          <textarea
-            className={`${inputClass} min-h-[160px] resize-y leading-relaxed`}
-            placeholder="Describe la idea: quién, dónde, qué pasa y el tono que buscas…"
-            value={form.prompt}
-            onChange={(e) => onChange({ prompt: e.target.value })}
-          />
-          <p className="mt-2 text-[12px] text-ink-3">El estudio la divide en unas 10 escenas con narración e ilustraciones.</p>
-        </Card>
-
-        <Card className="p-8">
-          <h3 className="mb-1 text-[17px] font-semibold tracking-tight">Estilo del video</h3>
-          <p className="mb-5 text-[13px] text-ink-2">
-            Define cómo se ven las ilustraciones y cómo se animan. Pasa el mouse sobre un estilo para ver su animación.
-          </p>
-          <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {VIDEO_STYLES.map((p) => (
-              <StyleCard
-                key={p.id}
-                style={p}
-                active={form.artStyle.trim() === p.artStyle && form.motionStyle.trim() === p.motionStyle}
-                onSelect={() => onChange({ artStyle: p.artStyle, motionStyle: p.motionStyle })}
-              />
-            ))}
-          </div>
-          <label className={labelClass}>Estilo gráfico</label>
-          <textarea
-            className={`${inputClass} mb-4 resize-y`}
-            rows={2}
-            placeholder="Elige un estilo o descríbelo con tus palabras…"
-            value={form.artStyle}
-            onChange={(e) => onChange({ artStyle: e.target.value })}
-          />
-          <label className={labelClass}>Tipo de animación</label>
-          <textarea
-            className={`${inputClass} resize-y`}
-            rows={2}
-            placeholder="Cómo se mueve la cámara y la escena (en inglés)…"
-            value={form.motionStyle}
-            onChange={(e) => onChange({ motionStyle: e.target.value })}
-          />
-          <p className="mt-2 text-[12px] text-ink-3">Se aplica a cada animación, también a las que vuelvas a generar.</p>
-        </Card>
-      </div>
-
-      <div className="flex flex-col gap-6 lg:sticky lg:top-24 lg:self-start">
-        <Card className="flex flex-col gap-3 p-6">
-          <Button variant="primary" size="lg" onClick={onGenerate} loading={generating} disabled={!form.prompt.trim()}>
-            {generating ? "Escribiendo escenas…" : sceneCount ? "Regenerar escenas" : "Generar escenas"}
-          </Button>
           <Button variant="secondary" onClick={onSave} loading={saving}>
             Guardar cambios
           </Button>
-          {sceneCount > 0 && !generating && (
-            <p className="text-center text-[12px] text-ink-3">
-              Los cambios en la historia o el estilo gráfico solo se aplican al regenerar las escenas.
-            </p>
-          )}
-          {generating && <Notice>Esto puede tardar hasta un minuto.</Notice>}
-          {error && <Notice tone="error">{error}</Notice>}
-        </Card>
-
-        <button onClick={onDelete} className="self-center text-[13px] text-red-400 hover:underline">
-          Eliminar proyecto
-        </button>
+          <Button variant="primary" onClick={onGenerate} loading={generating} disabled={!form.prompt.trim()}>
+            {generating ? "Escribiendo escenas…" : sceneCount ? "Regenerar escenas" : "Generar escenas"}
+          </Button>
+        </div>
       </div>
+
+      <button onClick={onDelete} className="self-center text-[13px] text-red-400 hover:underline">
+        Eliminar proyecto
+      </button>
     </div>
   );
 }

@@ -166,3 +166,42 @@ export async function api<T = unknown>(
   if (!res.ok) throw new Error((data as { error?: string }).error ?? `Error ${res.status}`);
   return data as T;
 }
+
+// Conexión cortada por el navegador o el proxy ("Load failed", "Failed to fetch", 502/504).
+function isConnectionError(e: unknown): boolean {
+  return e instanceof TypeError || (e instanceof Error && /^Error 50[234]$/.test(e.message));
+}
+
+// Generaciones largas: si la conexión se corta antes de la respuesta, el servidor
+// sigue trabajando, así que se consulta el comic hasta que aparezca el resultado.
+// Devuelve null cuando el resultado se obtuvo consultando.
+export async function apiGenerate<T = unknown>(
+  url: string,
+  opts: { method?: string; body?: unknown },
+  recovery: { comicId: string; done: (c: Comic) => boolean; timeoutMs?: number }
+): Promise<T | null> {
+  try {
+    return await api<T>(url, opts);
+  } catch (e) {
+    if (!isConnectionError(e)) throw e;
+  }
+  const deadline = Date.now() + (recovery.timeoutMs ?? 5 * 60_000);
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 4000));
+    const res = await fetch(`/api/comics/${recovery.comicId}`).catch(() => null);
+    if (res?.ok && recovery.done(await res.json())) return null;
+  }
+  throw new Error("Se perdió la conexión y el resultado no llegó a tiempo. Recarga la página para ver si terminó.");
+}
+
+export function findPanel(c: Comic, panelId: string): Panel | undefined {
+  for (const s of c.scenes) {
+    const p = s.panels.find((x) => x.id === panelId);
+    if (p) return p;
+  }
+  return undefined;
+}
+
+export function findScene(c: Comic, sceneId: string): Scene | undefined {
+  return c.scenes.find((s) => s.id === sceneId);
+}

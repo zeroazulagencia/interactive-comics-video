@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { api, comicProgress, DEFAULT_VIDEO_PROMPT, type Comic, type Panel } from "@/lib/comic";
+import { api, apiGenerate, comicProgress, DEFAULT_VIDEO_PROMPT, findPanel, findScene, type Comic, type Panel } from "@/lib/comic";
 import { Badge, Logo, ProgressBar } from "@/components/ui";
 import { IdeaStep, type IdeaForm } from "@/components/studio/IdeaStep";
 import { StoryboardStep } from "@/components/studio/StoryboardStep";
@@ -115,8 +115,14 @@ export default function ComicStudio() {
     setGenerating(true);
     try {
       await api(`/api/comics/${id}`, { method: "PATCH", body: metaBody(form) });
-      const data = await api<Comic>(`/api/comics/${id}/generate`, { method: "POST" });
-      setComic(data);
+      const before = comic.scenes.map((s) => s.id).join();
+      const data = await apiGenerate<Comic>(
+        `/api/comics/${id}/generate`,
+        { method: "POST" },
+        { comicId: id, done: (c) => c.scenes.length > 0 && c.scenes.map((s) => s.id).join() !== before }
+      );
+      if (data) setComic(data);
+      else await load();
       setStep("storyboard");
     } catch (e) {
       setIdeaError(
@@ -155,7 +161,11 @@ export default function ComicStudio() {
           sceneId: s.id,
           label: `Escena ${si + 1} · voz`,
           run: async () => {
-            await api(`/api/scenes/${s.id}/generate-voice`, { method: "POST" });
+            await apiGenerate(
+              `/api/scenes/${s.id}/generate-voice`,
+              { method: "POST" },
+              { comicId: c.id, done: (fresh) => !!findScene(fresh, s.id)?.audioUrl }
+            );
           },
         }));
     }
@@ -167,7 +177,11 @@ export default function ComicStudio() {
           sceneId: s.id,
           label: `${panelLabel(si, panel)} · ilustración`,
           run: async () => {
-            await api(`/api/panels/${panel.id}/generate-image`, { method: "POST" });
+            await apiGenerate(
+              `/api/panels/${panel.id}/generate-image`,
+              { method: "POST" },
+              { comicId: c.id, done: (fresh) => !!findPanel(fresh, panel.id)?.imageUrl }
+            );
           },
         }));
     }
@@ -181,7 +195,11 @@ export default function ComicStudio() {
           if (!panel.videoPrompt?.trim()) {
             await api(`/api/panels/${panel.id}`, { method: "PATCH", body: { videoPrompt: DEFAULT_VIDEO_PROMPT } });
           }
-          await api(`/api/panels/${panel.id}/generate-video`, { method: "POST", body: { duration: 5 } });
+          await apiGenerate(
+            `/api/panels/${panel.id}/generate-video`,
+            { method: "POST", body: { duration: 5 } },
+            { comicId: c.id, done: (fresh) => !!findPanel(fresh, panel.id)?.videoUrl, timeoutMs: 8 * 60_000 }
+          );
         },
       }));
   }
@@ -235,8 +253,14 @@ export default function ComicStudio() {
     setMixError(null);
     setMixing(true);
     try {
-      const data = await api<Comic>(`/api/comics/${id}/mix`, { method: "POST" });
-      setComic(data);
+      const before = comic?.finalVideoUrl ?? null;
+      const data = await apiGenerate<Comic>(
+        `/api/comics/${id}/mix`,
+        { method: "POST" },
+        { comicId: id, done: (c) => !!c.finalVideoUrl && c.finalVideoUrl !== before, timeoutMs: 10 * 60_000 }
+      );
+      if (data) setComic(data);
+      else await load();
     } catch (e) {
       setMixError(errMsg(e, "Error mezclando el video"));
     } finally {
@@ -356,6 +380,12 @@ export default function ComicStudio() {
             onOpenScene={openScene}
             onChanged={() => load()}
             onGoToIdea={() => setStep("idea")}
+            batch={batch}
+            stopping={stopping}
+            errorCount={batchErrors.length}
+            onRun={(kind) => runBatch([kind])}
+            onStop={stopBatch}
+            onGoToProduction={() => setStep("production")}
           />
         )}
         {step === "production" && (

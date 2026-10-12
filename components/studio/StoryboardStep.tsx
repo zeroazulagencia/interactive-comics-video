@@ -2,7 +2,7 @@
 
 import { comicProgress, sceneProgress, type Comic, type Scene } from "@/lib/comic";
 import { Badge, Button, Notice, Sheet, Spinner } from "@/components/ui";
-import { SceneEditor } from "./SceneEditor";
+import { SceneEditor, type Jobs } from "./SceneEditor";
 import type { Batch, TaskKind } from "./ProductionStep";
 
 export function StoryboardStep({
@@ -18,6 +18,7 @@ export function StoryboardStep({
   onRun,
   onStop,
   onGoToProduction,
+  jobs,
 }: {
   comic: Comic;
   activeId: string | null;
@@ -31,6 +32,7 @@ export function StoryboardStep({
   onRun: (kind: TaskKind) => void;
   onStop: () => void;
   onGoToProduction: () => void;
+  jobs: Jobs;
 }) {
   const vertical = comic.aspectRatio === "vertical";
   const openIndex = comic.scenes.findIndex((s) => s.id === openSceneId);
@@ -74,6 +76,7 @@ export function StoryboardStep({
             index={i}
             vertical={vertical}
             activeId={activeId}
+            running={jobs.running}
             onClick={() => onOpenScene(scene.id)}
           />
         ))}
@@ -114,6 +117,7 @@ export function StoryboardStep({
           <SceneEditor
             key={openScene.id}
             comicId={comic.id}
+            jobs={jobs}
             scene={openScene}
             aspectRatio={comic.aspectRatio}
             activeId={activeId}
@@ -192,16 +196,18 @@ function SceneTile({
   index,
   vertical,
   activeId,
+  running,
   onClick,
 }: {
   scene: Scene;
   index: number;
   vertical: boolean;
   activeId: string | null;
+  running: Jobs["running"];
   onClick: () => void;
 }) {
   const p = sceneProgress(scene);
-  const working = activeId === scene.id || scene.panels.some((panel) => panel.id === activeId);
+  const working = [scene.id, ...scene.panels.map((panel) => panel.id)].some((id) => id === activeId || !!running[id]);
   const tone = (done: boolean, partial = false) => (done ? "done" : partial ? "working" : "pending") as "done" | "working" | "pending";
 
   return (

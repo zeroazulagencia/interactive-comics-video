@@ -15,6 +15,15 @@ function SaveIndicator({ state }: { state: SaveState }) {
   );
 }
 
+// Generaciones en curso por escena (voz) o panel (ilustración/animación). Viven en
+// la página del proyecto para que sigan visibles al cerrar y reabrir la escena.
+export type JobKind = "voz" | "ilustracion" | "animacion";
+export type Jobs = {
+  running: Record<string, JobKind>;
+  errors: Record<string, string>;
+  run: (targetId: string, kind: JobKind, fn: () => Promise<void>) => void;
+};
+
 function errMsg(e: unknown, fallback: string) {
   return e instanceof Error ? e.message : fallback;
 }
@@ -24,6 +33,7 @@ export function SceneEditor({
   scene,
   aspectRatio,
   activeId,
+  jobs,
   onChanged,
   onDeleted,
 }: {
@@ -31,13 +41,13 @@ export function SceneEditor({
   scene: Scene;
   aspectRatio: string;
   activeId: string | null;
+  jobs: Jobs;
   onChanged: () => void;
   onDeleted: () => void;
 }) {
   const [title, setTitle] = useState(scene.title ?? "");
   const [narration, setNarration] = useState(scene.narration ?? "");
   const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [genVoice, setGenVoice] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function patch(body: Partial<Record<"title" | "narration", string>>) {
@@ -56,25 +66,19 @@ export function SceneEditor({
     if (value !== (scene[field] ?? "")) patch({ [field]: value });
   }
 
-  async function generateVoice() {
-    setErr(null);
-    setGenVoice(true);
-    try {
-      if (narration !== (scene.narration ?? "")) {
-        await api(`/api/scenes/${scene.id}`, { method: "PATCH", body: { narration } });
+  function generateVoice() {
+    const text = narration;
+    const before = scene.audioUrl;
+    jobs.run(scene.id, "voz", async () => {
+      if (text !== (scene.narration ?? "")) {
+        await api(`/api/scenes/${scene.id}`, { method: "PATCH", body: { narration: text } });
       }
-      const before = scene.audioUrl;
       await apiGenerate(
         `/api/scenes/${scene.id}/generate-voice`,
         { method: "POST" },
         { comicId, done: (c) => { const url = findScene(c, scene.id)?.audioUrl; return !!url && url !== before; } }
       );
-      onChanged();
-    } catch (e) {
-      setErr(errMsg(e, "Error generando la voz"));
-    } finally {
-      setGenVoice(false);
-    }
+    });
   }
 
   async function remove() {
@@ -87,7 +91,8 @@ export function SceneEditor({
     }
   }
 
-  const voiceBusy = genVoice || activeId === scene.id;
+  const voiceBusy = jobs.running[scene.id] === "voz" || activeId === scene.id;
+  const voiceError = jobs.errors[scene.id];
 
   return (
     <div className="flex flex-col gap-6">
@@ -131,9 +136,9 @@ export function SceneEditor({
             <span className="text-[13px] text-ink-3">Sin voz todavía</span>
           )}
         </div>
-        {err && (
+        {(err || voiceError) && (
           <div className="mt-4">
-            <Notice tone="error">{err}</Notice>
+            <Notice tone="error">{err ?? voiceError}</Notice>
           </div>
         )}
       </section>
@@ -142,6 +147,7 @@ export function SceneEditor({
         <PanelEditor
           key={panel.id}
           comicId={comicId}
+          jobs={jobs}
           panel={panel}
           aspectRatio={aspectRatio}
           busy={activeId === panel.id}
@@ -158,12 +164,14 @@ export function SceneEditor({
 
 function PanelEditor({
   comicId,
+  jobs,
   panel,
   aspectRatio,
   busy,
   onChanged,
 }: {
   comicId: string;
+  jobs: Jobs;
   panel: Panel;
   aspectRatio: string;
   busy: boolean;
@@ -172,8 +180,8 @@ function PanelEditor({
   const [imagePrompt, setImagePrompt] = useState(panel.imagePrompt ?? "");
   const [videoPrompt, setVideoPrompt] = useState(panel.videoPrompt || DEFAULT_VIDEO_PROMPT);
   const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [genImg, setGenImg] = useState(false);
-  const [genVideo, setGenVideo] = useState(false);
+  const genImg = jobs.running[panel.id] === "ilustracion";
+  const genVideo = jobs.running[panel.id] === "animacion";
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => setImagePrompt(panel.imagePrompt ?? ""), [panel.imagePrompt]);
@@ -190,31 +198,26 @@ function PanelEditor({
     }
   }
 
-  async function generateImage() {
+  function generateImage() {
+    const prompt = imagePrompt;
+    const before = panel.imageUrl;
     setErr(null);
-    setGenImg(true);
-    try {
-      await api(`/api/panels/${panel.id}`, { method: "PATCH", body: { imagePrompt } });
-      const before = panel.imageUrl;
+    jobs.run(panel.id, "ilustracion", async () => {
+      await api(`/api/panels/${panel.id}`, { method: "PATCH", body: { imagePrompt: prompt } });
       await apiGenerate(
         `/api/panels/${panel.id}/generate-image`,
         { method: "POST" },
         { comicId, done: (c) => { const url = findPanel(c, panel.id)?.imageUrl; return !!url && url !== before; } }
       );
-      onChanged();
-    } catch (e) {
-      setErr(errMsg(e, "Error generando la imagen"));
-    } finally {
-      setGenImg(false);
-    }
+    });
   }
 
-  async function animate() {
+  function animate() {
+    const prompt = videoPrompt;
+    const before = panel.videoUrl;
     setErr(null);
-    setGenVideo(true);
-    try {
-      await api(`/api/panels/${panel.id}`, { method: "PATCH", body: { videoPrompt } });
-      const before = panel.videoUrl;
+    jobs.run(panel.id, "animacion", async () => {
+      await api(`/api/panels/${panel.id}`, { method: "PATCH", body: { videoPrompt: prompt } });
       await apiGenerate(
         `/api/panels/${panel.id}/generate-video`,
         { method: "POST", body: { duration: 5 } },
@@ -224,12 +227,7 @@ function PanelEditor({
           timeoutMs: 8 * 60_000,
         }
       );
-      onChanged();
-    } catch (e) {
-      setErr(errMsg(e, "Error generando la animación"));
-    } finally {
-      setGenVideo(false);
-    }
+    });
   }
 
   const working = genImg || genVideo || busy;
@@ -321,9 +319,9 @@ function PanelEditor({
           </div>
         </details>
 
-        {err && (
+        {(err || jobs.errors[panel.id]) && (
           <div className="mt-4">
-            <Notice tone="error">{err}</Notice>
+            <Notice tone="error">{err ?? jobs.errors[panel.id]}</Notice>
           </div>
         )}
       </div>

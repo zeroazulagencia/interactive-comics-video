@@ -9,6 +9,7 @@ import { IdeaStep, type IdeaForm } from "@/components/studio/IdeaStep";
 import { StoryboardStep } from "@/components/studio/StoryboardStep";
 import { ProductionStep, type Batch, type BatchError, type TaskKind } from "@/components/studio/ProductionStep";
 import { PreviewStep } from "@/components/studio/PreviewStep";
+import type { JobKind, Jobs } from "@/components/studio/SceneEditor";
 
 type Step = "idea" | "storyboard" | "production" | "preview";
 
@@ -56,6 +57,10 @@ export default function ComicStudio() {
   const stopRef = useRef(false);
   const [stopping, setStopping] = useState(false);
 
+  const [running, setRunning] = useState<Jobs["running"]>({});
+  const runningRef = useRef<Jobs["running"]>({});
+  const [jobErrors, setJobErrors] = useState<Jobs["errors"]>({});
+
   const [mixing, setMixing] = useState(false);
   const [mixError, setMixError] = useState<string | null>(null);
 
@@ -81,12 +86,13 @@ export default function ComicStudio() {
   }, [id]);
 
   // Aviso al cerrar la pestaña mientras hay trabajo en curso.
+  const jobCount = Object.keys(running).length;
   useEffect(() => {
-    if (!batch && !mixing && !generating) return;
+    if (!batch && !mixing && !generating && !jobCount) return;
     const onUnload = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener("beforeunload", onUnload);
     return () => window.removeEventListener("beforeunload", onUnload);
-  }, [batch, mixing, generating]);
+  }, [batch, mixing, generating, jobCount]);
 
   function metaBody(f: IdeaForm) {
     return { ...f, title: f.title.trim() || "Sin título" };
@@ -142,6 +148,33 @@ export default function ComicStudio() {
       setIdeaError(errMsg(e, "No se pudo eliminar"));
     }
   }
+
+  // ---- Generaciones individuales (desde el editor de escena) ----
+
+  function setRunningJobs(next: Jobs["running"]) {
+    runningRef.current = next;
+    setRunning(next);
+  }
+
+  async function runJob(targetId: string, kind: JobKind, fn: () => Promise<void>) {
+    if (runningRef.current[targetId]) return;
+    setRunningJobs({ ...runningRef.current, [targetId]: kind });
+    setJobErrors((prev) => {
+      const { [targetId]: _, ...rest } = prev;
+      return rest;
+    });
+    try {
+      await fn();
+    } catch (e) {
+      setJobErrors((prev) => ({ ...prev, [targetId]: errMsg(e, "Error generando") }));
+    } finally {
+      const { [targetId]: _, ...rest } = runningRef.current;
+      setRunningJobs(rest);
+      await load();
+    }
+  }
+
+  const jobs: Jobs = { running, errors: jobErrors, run: runJob };
 
   // ---- Producción por lotes (una tarea a la vez, desde el navegador) ----
 
@@ -213,6 +246,7 @@ export default function ComicStudio() {
     for (let i = 0; i < tasks.length; i++) {
       if (stopRef.current) return false;
       const task = tasks[i];
+      if (runningRef.current[task.id]) continue;
       setBatch({ kind, label: `Generando ${task.label.toLowerCase()}`, current: i + 1, total: tasks.length });
       setActiveId(task.id);
       try {
@@ -346,6 +380,9 @@ export default function ComicStudio() {
                 </span>
               </span>
             )}
+            {jobCount > 0 && !batch && (
+              <Badge tone="working">Generando {jobCount}</Badge>
+            )}
             {batch && step !== "production" && (
               <button onClick={() => setStep("production")}>
                 <Badge tone="working">
@@ -386,6 +423,7 @@ export default function ComicStudio() {
             onRun={(kind) => runBatch([kind])}
             onStop={stopBatch}
             onGoToProduction={() => setStep("production")}
+            jobs={jobs}
           />
         )}
         {step === "production" && (

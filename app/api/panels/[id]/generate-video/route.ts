@@ -39,18 +39,23 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const comic = panel.scene.comic;
   const draft = body.draft === true;
   const motionStyle = comic.motionStyle?.trim();
+  // Transición: el clip del primer panel termina en la ilustración del siguiente.
+  const next = panel.scene.panels.find((p) => p.order > panel.order && p.imageUrl);
+  const lastFrameUrl = comic.videoTransition && next ? next.imageUrl : null;
+  // Sin esta indicación, p-video corta a otro plano cuando el prompt describe
+  // solo el ambiente (por ejemplo, la cuerda y las tablas en vez de los personajes).
   const prompt = [
     panel.videoPrompt,
     motionStyle ? `Animation style: ${motionStyle}` : "",
     comic.animateCharacters
       ? "Characters may move subtly and naturally (breathing, blinking, small gestures) while their faces and bodies stay consistent"
       : "",
+    lastFrameUrl
+      ? "One single continuous shot that starts exactly on the input image and moves smoothly into the final image. No cuts, no jumps"
+      : "One single continuous shot that starts exactly on the input image and keeps its composition, characters and framing. No cuts, no scene changes, no new shots",
   ]
     .filter(Boolean)
     .join(". ");
-  // Transición: el clip del primer panel termina en la ilustración del siguiente.
-  const next = panel.scene.panels.find((p) => p.order > panel.order && p.imageUrl);
-  const lastFrameUrl = comic.videoTransition && next ? next.imageUrl : null;
 
   if (!startJob(panel.id, panel.scene.comicId, "animacion")) {
     return NextResponse.json(JOB_BUSY, { status: 409 });
@@ -60,6 +65,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const { url: videoSourceUrl, costUsd } = await generateVideo(await dataUri(panel.imageUrl), prompt, duration, {
       draft,
       lastFrameDataUri: lastFrameUrl ? await dataUri(lastFrameUrl) : undefined,
+      promptUpsampling: false,
     });
     await recordCost({
       comicId: panel.scene.comicId,

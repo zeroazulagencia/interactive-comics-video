@@ -154,7 +154,7 @@ export async function generateVideo(
   imageDataUri: string,
   prompt: string,
   duration: number,
-  opts: { draft?: boolean; lastFrameDataUri?: string } = {}
+  opts: { draft?: boolean; lastFrameDataUri?: string; promptUpsampling?: boolean } = {}
 ): Promise<{ url: string; costUsd: number }> {
   const seconds = Math.max(1, Math.min(10, Math.round(duration)));
   const { output, metrics } = await runModelAndPoll(
@@ -168,7 +168,7 @@ export async function generateVideo(
       draft: !!opts.draft,
       ...(opts.lastFrameDataUri ? { last_frame_image: opts.lastFrameDataUri } : {}),
       disable_safety_filter: true,
-      prompt_upsampling: true,
+      prompt_upsampling: opts.promptUpsampling ?? true,
     },
     { maxWaitMs: 270 * 1000 }
   );

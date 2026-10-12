@@ -114,6 +114,28 @@ export async function ffprobeDuration(file: string): Promise<number> {
   return seconds;
 }
 
+// p-video a veces mete un cambio de plano en los primeros o últimos fotogramas
+// (sobre todo al terminar en la imagen del panel siguiente). Ese tramo dura
+// menos de un segundo y se ve como un destello: se recorta.
+const EDGE_CUT_SECONDS = 0.75;
+const CUT_SCENE_SCORE = 0.3;
+
+async function edgeTrim(file: string, duration: number): Promise<{ start: number; end: number }> {
+  const { stdout } = await run(
+    FFMPEG_PATH,
+    ["-v", "error", "-i", file, "-an", "-vf", `select='gt(scene,${CUT_SCENE_SCORE})',metadata=print:file=-`, "-f", "null", "-"],
+    { maxBuffer: 10 * 1024 * 1024 }
+  );
+  const cuts = [...stdout.matchAll(/pts_time:([\d.]+)/g)].map((m) => parseFloat(m[1]));
+  let start = 0;
+  let end = duration;
+  for (const t of cuts) {
+    if (t <= EDGE_CUT_SECONDS) start = Math.max(start, t);
+    else if (t >= duration - EDGE_CUT_SECONDS) end = Math.min(end, t);
+  }
+  return { start, end };
+}
+
 function resolutionFor(aspectRatio: string): { width: number; height: number } {
   return aspectRatio === "vertical" ? { width: 720, height: 1280 } : { width: 1280, height: 720 };
 }
@@ -155,13 +177,14 @@ export async function mixComic(opts: {
       for (let p = 0; p < 2; p++) {
         const videoPath = panelVideoPaths[p];
         const videoDuration = await ffprobeDuration(videoPath);
-        const factor = halfDuration / videoDuration;
+        const { start, end } = await edgeTrim(videoPath, videoDuration);
+        const factor = halfDuration / (end - start);
         const partPath = path.join(tmpDir, `s${i}-p${p}.mp4`);
         await run(FFMPEG_PATH, [
           "-y",
           "-i", videoPath,
           "-vf",
-          `setpts=${factor}*PTS,scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},fps=24,format=yuv420p`,
+          `trim=start=${start}:end=${end},setpts=PTS-STARTPTS,setpts=${factor}*PTS,scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},fps=24,format=yuv420p`,
           "-an",
           "-t", String(halfDuration),
           "-c:v", "libx264",

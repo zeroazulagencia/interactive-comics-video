@@ -119,7 +119,8 @@ export function IdeaStep({
               onChange={(v) => onChange({ videoTransition: v })}
             />
             <p className="mt-1 text-[12px] text-ink-3">
-              La animación del panel 1 termina en la ilustración del panel 2. Sin costo extra.
+              La animación del panel 1 termina en la ilustración del panel 2. Sin costo extra. Funciona mejor cuando los
+              dos paneles tienen un encuadre parecido; si son muy distintos, el estudio recorta el salto final.
             </p>
           </div>
           <div>

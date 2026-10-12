@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { comicInclude, prisma } from "@/lib/prisma";
 import { comicJobs } from "@/lib/jobs";
 
 // GET /api/comics/:id — un comic con sus escenas
@@ -9,17 +9,13 @@ export async function GET(
 ) {
   const comic = await prisma.comic.findUnique({
     where: { id: params.id },
-    include: {
-      scenes: {
-        orderBy: { order: "asc" },
-        include: { panels: { orderBy: { order: "asc" } } },
-      },
-    },
+    include: comicInclude,
   });
   if (!comic) {
     return NextResponse.json({ error: "No encontrado" }, { status: 404 });
   }
-  return NextResponse.json({ ...comic, jobs: comicJobs(comic.id) });
+  const spent = await prisma.cost.aggregate({ where: { comicId: comic.id }, _sum: { amountUsd: true } });
+  return NextResponse.json({ ...comic, costUsd: spent._sum.amountUsd ?? 0, jobs: comicJobs(comic.id) });
 }
 
 // PATCH /api/comics/:id — actualiza título, prompt, estilo
@@ -34,6 +30,11 @@ export async function PATCH(
     "prompt",
     "artStyle",
     "motionStyle",
+    "voiceId",
+    "voiceSpeed",
+    "videoDuration",
+    "videoTransition",
+    "animateCharacters",
     "published",
     "author",
     "subtitlesEnabled",
@@ -44,6 +45,8 @@ export async function PATCH(
   ]) {
     if (k in body) data[k] = body[k];
   }
+  if ("voiceSpeed" in data) data.voiceSpeed = Math.min(1.4, Math.max(0.8, Number(data.voiceSpeed) || 1.15));
+  if ("videoDuration" in data) data.videoDuration = Math.round(Math.min(10, Math.max(0, Number(data.videoDuration) || 0)));
 
   const current = await prisma.comic.findUnique({ where: { id: params.id } });
   if (!current) {

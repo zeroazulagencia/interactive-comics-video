@@ -6,10 +6,15 @@ import Link from "next/link";
 import {
   api,
   apiGenerate,
+  BUDGET_USD,
   comicProgress,
   DEFAULT_VIDEO_PROMPT,
+  estimatePending,
   findPanel,
   findScene,
+  formatUsd,
+  missingPortraits,
+  outdatedVoices,
   type Comic,
   type JobKind,
   type Panel,
@@ -17,14 +22,16 @@ import {
 import { Badge, Logo, ProgressBar } from "@/components/ui";
 import { IdeaStep, type IdeaForm } from "@/components/studio/IdeaStep";
 import { StoryboardStep } from "@/components/studio/StoryboardStep";
+import { CastStep } from "@/components/studio/CastStep";
 import { ProductionStep, type Batch, type BatchError, type TaskKind } from "@/components/studio/ProductionStep";
 import { PreviewStep } from "@/components/studio/PreviewStep";
 import type { Jobs } from "@/components/studio/SceneEditor";
 
-type Step = "idea" | "storyboard" | "production" | "preview";
+type Step = "idea" | "cast" | "storyboard" | "production" | "preview";
 
 const STEPS: { value: Step; label: string }[] = [
   { value: "idea", label: "Idea" },
+  { value: "cast", label: "Elenco" },
   { value: "storyboard", label: "Storyboard" },
   { value: "production", label: "Producción" },
   { value: "preview", label: "Vista previa" },
@@ -41,6 +48,11 @@ function formFrom(c: Comic): IdeaForm {
     prompt: c.prompt ?? "",
     artStyle: c.artStyle ?? "",
     motionStyle: c.motionStyle ?? "",
+    voiceId: c.voiceId,
+    voiceSpeed: c.voiceSpeed,
+    videoDuration: c.videoDuration,
+    videoTransition: c.videoTransition,
+    animateCharacters: c.animateCharacters,
   };
 }
 
@@ -136,7 +148,10 @@ export default function ComicStudio() {
 
   async function generate() {
     if (!form || !comic) return;
-    if (comic.scenes.length > 0 && !confirm("Se reemplazarán todas las escenas, voces, ilustraciones y animaciones. ¿Continuar?")) {
+    if (
+      comic.scenes.length > 0 &&
+      !confirm("Se reemplazarán todas las escenas, el elenco, las voces, ilustraciones y animaciones. ¿Continuar?")
+    ) {
       return;
     }
     setIdeaError(null);
@@ -151,7 +166,7 @@ export default function ComicStudio() {
       );
       if (data) setComic(data);
       else await load();
-      setStep("storyboard");
+      setStep("cast");
     } catch (e) {
       setIdeaError(
         errMsg(e, "La petición no llegó a completarse (posible timeout o conexión bloqueada hacia OpenAI).")
@@ -203,17 +218,18 @@ export default function ComicStudio() {
 
   // ---- Producción por lotes (una tarea a la vez, desde el navegador) ----
 
-  type Task = { id: string; sceneId: string; label: string; run: () => Promise<void> };
+  type Task = { id: string; sceneId: string | null; label: string; run: () => Promise<void> };
 
   function tasksFor(kind: TaskKind, c: Comic): Task[] {
     const panelsOf = () =>
       c.scenes.flatMap((s, si) => s.panels.map((panel) => ({ s, si, panel })));
     const panelLabel = (si: number, panel: Panel) => `Escena ${si + 1} · panel ${panel.order}`;
 
-    if (kind === "voces") {
+    if (kind === "voces" || kind === "revoces") {
+      const outdated = new Set(outdatedVoices(c).map((s) => s.id));
       return c.scenes
         .map((s, si) => ({ s, si }))
-        .filter(({ s }) => !s.audioUrl && !!s.narration?.trim())
+        .filter(({ s }) => (kind === "voces" ? !s.audioUrl : outdated.has(s.id)) && !!s.narration?.trim())
         .map(({ s, si }) => ({
           id: s.id,
           sceneId: s.id,
@@ -222,7 +238,34 @@ export default function ComicStudio() {
             await apiGenerate(
               `/api/scenes/${s.id}/generate-voice`,
               { method: "POST" },
-              { comicId: c.id, targetId: s.id, done: (fresh) => !!findScene(fresh, s.id)?.audioUrl }
+              {
+                comicId: c.id,
+                targetId: s.id,
+                done: (fresh) => {
+                  const url = findScene(fresh, s.id)?.audioUrl;
+                  return !!url && url !== s.audioUrl;
+                },
+              }
+            );
+          },
+        }));
+    }
+    if (kind === "retratos") {
+      return missingPortraits(c)
+        .filter((ch) => !!ch.description.trim())
+        .map((ch) => ({
+          id: ch.id,
+          sceneId: null,
+          label: `Retrato de ${ch.name}`,
+          run: async () => {
+            await apiGenerate(
+              `/api/characters/${ch.id}/generate-portrait`,
+              { method: "POST" },
+              {
+                comicId: c.id,
+                targetId: ch.id,
+                done: (fresh) => !!fresh.characters.find((x) => x.id === ch.id)?.imageUrl,
+              }
             );
           },
         }));
@@ -255,7 +298,7 @@ export default function ComicStudio() {
           }
           await apiGenerate(
             `/api/panels/${panel.id}/generate-video`,
-            { method: "POST", body: { duration: 5 } },
+            { method: "POST", body: {} },
             {
               comicId: c.id,
               targetId: panel.id,
@@ -293,7 +336,21 @@ export default function ComicStudio() {
     return true;
   }
 
-  async function runBatch(kinds: TaskKind[]) {
+  // Las ilustraciones necesitan antes los retratos del elenco.
+  async function runBatch(requested: TaskKind[]) {
+    const kinds = requested.flatMap((k): TaskKind[] => (k === "ilustraciones" ? ["retratos", "ilustraciones"] : [k]));
+    if (comic) {
+      const pending = estimatePending(comic);
+      const projected = (comic.costUsd ?? 0) + kinds.reduce((sum, k) => sum + pending[k], 0);
+      if (
+        projected > BUDGET_USD &&
+        !confirm(
+          `Con esto el proyecto llegaría a unos ${formatUsd(projected)}, por encima del límite de ${formatUsd(BUDGET_USD)}. ¿Continuar?`
+        )
+      ) {
+        return;
+      }
+    }
     stopRef.current = false;
     setStopping(false);
     setBatchErrors([]);
@@ -415,6 +472,7 @@ export default function ComicStudio() {
                 </span>
               </span>
             )}
+            {hasScenes && <BudgetChip comic={comic} />}
             {jobCount > 0 && !batch && (
               <Badge tone="working">Generando {jobCount}</Badge>
             )}
@@ -444,6 +502,20 @@ export default function ComicStudio() {
             onDelete={removeComic}
           />
         )}
+        {step === "cast" && (
+          <CastStep
+            comic={comic}
+            jobs={jobs}
+            batch={batch}
+            activeId={activeId}
+            stopping={stopping}
+            onRunPortraits={() => runBatch(["retratos"])}
+            onStop={stopBatch}
+            onChanged={() => load()}
+            onReplace={(c) => setComic(c)}
+            onContinue={() => setStep("storyboard")}
+          />
+        )}
         {step === "storyboard" && (
           <StoryboardStep
             comic={comic}
@@ -458,6 +530,7 @@ export default function ComicStudio() {
             onRun={(kind) => runBatch([kind])}
             onStop={stopBatch}
             onGoToProduction={() => setStep("production")}
+            onGoToCast={() => setStep("cast")}
             jobs={jobs}
           />
         )}
@@ -485,5 +558,23 @@ export default function ComicStudio() {
         )}
       </main>
     </div>
+  );
+}
+
+// Gasto del proyecto frente al límite, con la estimación de lo que falta.
+function BudgetChip({ comic }: { comic: Comic }) {
+  const spent = comic.costUsd ?? 0;
+  const pending = estimatePending(comic);
+  const projected = spent + pending.voces + pending.retratos + pending.ilustraciones + pending.animaciones + pending.mezcla;
+  const over = projected > BUDGET_USD;
+  return (
+    <span
+      title={`Gastado ${formatUsd(spent)} · falta generar ~${formatUsd(projected - spent)} · total estimado ~${formatUsd(projected)} (límite ${formatUsd(BUDGET_USD)})`}
+      className={`hidden rounded-full px-2.5 py-1 text-[12px] tabular-nums ring-1 ring-inset md:inline ${
+        over ? "bg-red-500/10 text-red-300 ring-red-400/30" : "bg-white/[0.04] text-ink-2 ring-white/[0.08]"
+      }`}
+    >
+      {formatUsd(spent)} <span className="text-ink-3">/ ~{formatUsd(projected)}</span>
+    </span>
   );
 }

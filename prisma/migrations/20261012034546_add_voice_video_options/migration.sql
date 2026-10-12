@@ -1,0 +1,13 @@
+-- AlterTable
+ALTER TABLE "Scene" ADD COLUMN "audioVoice" TEXT;
+
+-- AlterTable
+ALTER TABLE "Comic" ADD COLUMN "voiceId" TEXT NOT NULL DEFAULT 'Spanish_ReliableMan';
+ALTER TABLE "Comic" ADD COLUMN "voiceSpeed" REAL NOT NULL DEFAULT 1.15;
+ALTER TABLE "Comic" ADD COLUMN "videoDuration" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "Comic" ADD COLUMN "videoTransition" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "Comic" ADD COLUMN "animateCharacters" BOOLEAN NOT NULL DEFAULT false;
+
+-- AlterTable
+ALTER TABLE "Panel" ADD COLUMN "videoDraft" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "Panel" ADD COLUMN "duration" INTEGER;

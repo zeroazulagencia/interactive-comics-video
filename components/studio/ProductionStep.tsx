@@ -1,9 +1,10 @@
 "use client";
 
-import { comicProgress, type Comic } from "@/lib/comic";
+import { BUDGET_USD, comicProgress, estimatePending, formatUsd, missingPortraits, type Comic } from "@/lib/comic";
 import { Badge, Button, Card, Notice, ProgressBar, Spinner } from "@/components/ui";
 
-export type TaskKind = "voces" | "ilustraciones" | "animaciones";
+// "revoces" rehace las voces generadas con una voz anterior del proyecto.
+export type TaskKind = "voces" | "revoces" | "retratos" | "ilustraciones" | "animaciones";
 
 export type Batch = {
   kind: TaskKind;
@@ -35,10 +36,33 @@ export function ProductionStep({
 }) {
   const p = comicProgress(comic);
   const pending = p.total - p.done;
+  const missing = missingPortraits(comic).length;
+  const portraits = comic.characters.filter((c) => c.imageUrl).length;
+  const spent = comic.costUsd ?? 0;
+  const est = estimatePending(comic);
+  const projected = spent + est.voces + est.retratos + est.ilustraciones + est.animaciones + est.mezcla;
 
   const rows: { kind: TaskKind; title: string; detail: string; done: number; total: number; note?: string }[] = [
     { kind: "voces", title: "Voces", detail: "Narración de cada escena", done: p.voices, total: p.scenes },
-    { kind: "ilustraciones", title: "Ilustraciones", detail: "Una imagen por panel", done: p.images, total: p.panels },
+    ...(comic.characters.length > 0
+      ? [
+          {
+            kind: "retratos" as const,
+            title: "Retratos",
+            detail: "Referencia de cada personaje",
+            done: portraits,
+            total: portraits + missing,
+          },
+        ]
+      : []),
+    {
+      kind: "ilustraciones",
+      title: "Ilustraciones",
+      detail: "Una imagen por panel",
+      done: p.images,
+      total: p.panels,
+      note: missing > 0 ? "Antes se generan los retratos que falten." : undefined,
+    },
     {
       kind: "animaciones",
       title: "Animaciones",
@@ -87,6 +111,10 @@ export function ProductionStep({
             {p.done}/{p.total}
           </span>
         </div>
+        <p className={`mt-4 text-[13px] tabular-nums ${projected > BUDGET_USD ? "text-red-300" : "text-ink-2"}`}>
+          Gastado {formatUsd(spent)} · falta generar ~{formatUsd(projected - spent)} · total estimado ~
+          {formatUsd(projected)} de un límite de {formatUsd(BUDGET_USD)}
+        </p>
         {batch && (
           <div className="mt-5">
             <Notice>

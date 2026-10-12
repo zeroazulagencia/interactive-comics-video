@@ -1,8 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, apiGenerate, DEFAULT_VIDEO_PROMPT, findPanel, findScene, type JobKind, type Panel, type Scene } from "@/lib/comic";
-import { Button, Notice, Spinner, inputClass, labelClass } from "@/components/ui";
+import {
+  api,
+  apiGenerate,
+  clipSeconds,
+  DEFAULT_VIDEO_PROMPT,
+  findPanel,
+  findScene,
+  formatUsd,
+  isVoiceOutdated,
+  type Comic,
+  type JobKind,
+  type Panel,
+  type Scene,
+} from "@/lib/comic";
+import { voiceName } from "@/lib/voices";
+import { Badge, Button, Notice, Spinner, inputClass, labelClass } from "@/components/ui";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -27,23 +41,35 @@ function errMsg(e: unknown, fallback: string) {
   return e instanceof Error ? e.message : fallback;
 }
 
+// Movimientos de cámara que se añaden al prompt de animación.
+const CAMERA_MOVES: { label: string; text: string }[] = [
+  { label: "Acercamiento", text: "slow push-in camera" },
+  { label: "Alejamiento", text: "slow pull-out camera" },
+  { label: "Paneo lateral", text: "slow lateral pan" },
+  { label: "Inclinación", text: "slow upward tilt" },
+  { label: "Órbita", text: "slow orbit around the subject" },
+  { label: "Cámara en mano", text: "subtle handheld camera sway" },
+  { label: "Cámara fija", text: "static locked-off camera, only ambient motion" },
+];
+
+const PANEL_DURATIONS = [0, 3, 4, 5, 6, 8];
+
 export function SceneEditor({
-  comicId,
+  comic,
   scene,
-  aspectRatio,
   activeId,
   jobs,
   onChanged,
   onDeleted,
 }: {
-  comicId: string;
+  comic: Comic;
   scene: Scene;
-  aspectRatio: string;
   activeId: string | null;
   jobs: Jobs;
   onChanged: () => void;
   onDeleted: () => void;
 }) {
+  const comicId = comic.id;
   const [title, setTitle] = useState(scene.title ?? "");
   const [narration, setNarration] = useState(scene.narration ?? "");
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -96,6 +122,7 @@ export function SceneEditor({
 
   const voiceBusy = jobs.running[scene.id] === "voz" || activeId === scene.id;
   const voiceError = jobs.errors[scene.id];
+  const oldVoice = isVoiceOutdated(comic, scene);
 
   return (
     <div className="flex flex-col gap-6">
@@ -139,6 +166,11 @@ export function SceneEditor({
             <span className="text-[13px] text-ink-3">Sin voz todavía</span>
           )}
         </div>
+        <p className={`mt-2 text-[12px] ${oldVoice ? "text-orange-300" : "text-ink-3"}`}>
+          {oldVoice
+            ? `Esta voz se generó con otra voz o velocidad. Regenérala para usar la del proyecto: ${voiceName(comic.voiceId)}.`
+            : `Voz del proyecto: ${voiceName(comic.voiceId)}, ${comic.voiceSpeed.toFixed(2)}×. Se cambia en el paso Idea.`}
+        </p>
         {(err || voiceError) && (
           <div className="mt-4">
             <Notice tone="error">{err ?? voiceError}</Notice>
@@ -149,10 +181,10 @@ export function SceneEditor({
       {scene.panels.map((panel) => (
         <PanelEditor
           key={panel.id}
-          comicId={comicId}
+          comic={comic}
+          scene={scene}
           jobs={jobs}
           panel={panel}
-          aspectRatio={aspectRatio}
           busy={activeId === panel.id}
           onChanged={onChanged}
         />
@@ -166,20 +198,25 @@ export function SceneEditor({
 }
 
 function PanelEditor({
-  comicId,
+  comic,
+  scene,
   jobs,
   panel,
-  aspectRatio,
   busy,
   onChanged,
 }: {
-  comicId: string;
+  comic: Comic;
+  scene: Scene;
   jobs: Jobs;
   panel: Panel;
-  aspectRatio: string;
   busy: boolean;
   onChanged: () => void;
 }) {
+  const comicId = comic.id;
+  const aspectRatio = comic.aspectRatio;
+  const inPanel = new Set((panel.characters ?? []).map((c) => c.id));
+  const missingPortrait = comic.characters.filter((c) => inPanel.has(c.id) && !c.imageUrl);
+  const seconds = clipSeconds(comic, scene, panel);
   const [imagePrompt, setImagePrompt] = useState(panel.imagePrompt ?? "");
   const [videoPrompt, setVideoPrompt] = useState(panel.videoPrompt || DEFAULT_VIDEO_PROMPT);
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -189,7 +226,7 @@ function PanelEditor({
 
   useEffect(() => setImagePrompt(panel.imagePrompt ?? ""), [panel.imagePrompt]);
 
-  async function savePrompts(body: { imagePrompt?: string; videoPrompt?: string }) {
+  async function savePrompts(body: { imagePrompt?: string; videoPrompt?: string; duration?: number; characterIds?: string[] }) {
     setSaveState("saving");
     try {
       await api(`/api/panels/${panel.id}`, { method: "PATCH", body });
@@ -219,7 +256,22 @@ function PanelEditor({
     });
   }
 
-  function animate() {
+  function toggleCharacter(id: string) {
+    const next = new Set(inPanel);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    savePrompts({ characterIds: [...next] });
+  }
+
+  function toggleCamera(text: string) {
+    const next = videoPrompt.includes(text)
+      ? videoPrompt.replace(new RegExp(`(,\\s*)?${text}`), "").replace(/^,\s*/, "")
+      : `${videoPrompt.trim().replace(/[.,]\s*$/, "")}${videoPrompt.trim() ? ", " : ""}${text}`;
+    setVideoPrompt(next);
+    savePrompts({ videoPrompt: next });
+  }
+
+  function animate(draft = false) {
     const prompt = videoPrompt;
     const before = panel.videoUrl;
     setErr(null);
@@ -227,7 +279,7 @@ function PanelEditor({
       await api(`/api/panels/${panel.id}`, { method: "PATCH", body: { videoPrompt: prompt } });
       await apiGenerate(
         `/api/panels/${panel.id}/generate-video`,
-        { method: "POST", body: { duration: 5 } },
+        { method: "POST", body: { draft } },
         {
           comicId,
           targetId: panel.id,
@@ -257,6 +309,11 @@ function PanelEditor({
         ) : (
           <div className="flex h-full items-center justify-center text-[13px] text-ink-3">Sin ilustración todavía</div>
         )}
+        {panel.videoUrl && panel.videoDraft && (
+          <span className="absolute left-3 top-3">
+            <Badge tone="warn">Borrador</Badge>
+          </span>
+        )}
         {working && (
           <div className="animate-fade-in absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <span className="flex items-center gap-2 rounded-full bg-surface px-4 py-2 text-[13px] font-medium shadow-sm">
@@ -279,28 +336,92 @@ function PanelEditor({
             size="sm"
             onClick={generateImage}
             loading={genImg}
-            disabled={working || !imagePrompt.trim()}
+            disabled={working || !imagePrompt.trim() || missingPortrait.length > 0}
+            title={missingPortrait.length > 0 ? "Genera primero los retratos del elenco" : undefined}
           >
             {panel.imageUrl ? "Regenerar ilustración" : "Generar ilustración"}
           </Button>
           <Button
-            variant={panel.imageUrl && !panel.videoUrl ? "primary" : "secondary"}
+            variant={panel.imageUrl && (!panel.videoUrl || panel.videoDraft) ? "primary" : "secondary"}
             size="sm"
-            onClick={animate}
+            onClick={() => animate(false)}
             loading={genVideo}
             disabled={working || !panel.imageUrl || !videoPrompt.trim()}
             title={!panel.imageUrl ? "Genera primero la ilustración" : undefined}
           >
-            {panel.videoUrl ? "Regenerar animación" : "Animar"}
+            {panel.videoUrl && !panel.videoDraft ? "Regenerar animación" : "Animar"} · {formatUsd(seconds * 0.02)}
+          </Button>
+          <Button
+            variant="plain"
+            size="sm"
+            onClick={() => animate(true)}
+            disabled={working || !panel.imageUrl || !videoPrompt.trim()}
+            title="Vista previa de menor calidad, 4 veces más barata"
+          >
+            Probar en borrador · {formatUsd(seconds * 0.005)}
           </Button>
         </div>
+        {missingPortrait.length > 0 && (
+          <p className="mt-2 text-[12px] text-orange-300">
+            Falta el retrato de {missingPortrait.map((c) => c.name).join(", ")}. Genéralo en el Elenco antes de ilustrar.
+          </p>
+        )}
         {panel.imageUrl && panel.videoUrl && (
           <p className="mt-2 text-[12px] text-ink-3">Regenerar la ilustración descarta la animación actual.</p>
         )}
 
+        {comic.characters.length > 0 && (
+          <div className="mt-5">
+            <span className={labelClass}>Quién aparece</span>
+            <div className="flex flex-wrap gap-1.5">
+              {comic.characters.map((c) => {
+                const on = inPanel.has(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => toggleCharacter(c.id)}
+                    disabled={working}
+                    className={`flex items-center gap-1.5 rounded-full py-1 pl-1 pr-3 text-[12px] font-medium ring-1 transition disabled:opacity-40 ${
+                      on ? "bg-accent/10 text-ink ring-accent" : "bg-white/[0.03] text-ink-3 ring-white/[0.08] hover:text-ink-2"
+                    }`}
+                  >
+                    {c.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={c.imageUrl} alt="" className="h-5 w-5 rounded-full object-cover" />
+                    ) : (
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/[0.08] text-[10px]">
+                        {c.name.slice(0, 1)}
+                      </span>
+                    )}
+                    {c.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <span className="text-[13px] text-ink-2">Duración del clip</span>
+          <select
+            className="rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-[13px] text-ink outline-none"
+            value={panel.duration ?? 0}
+            onChange={(e) => savePrompts({ duration: Number(e.target.value) })}
+            disabled={working}
+          >
+            {PANEL_DURATIONS.map((d) => (
+              <option key={d} value={d}>
+                {d === 0 ? `Del proyecto (${comic.videoDuration ? `${comic.videoDuration} s` : "automática"})` : `${d} s`}
+              </option>
+            ))}
+          </select>
+          <span className="text-[12px] tabular-nums text-ink-3">{seconds} s</span>
+        </div>
+
         <details className="group mt-5">
           <summary className="cursor-pointer list-none text-[13px] font-medium text-accent">
-            <span className="group-open:hidden">Mostrar prompts</span>
+            <span className="group-open:hidden">Mostrar prompts y movimiento de cámara</span>
             <span className="hidden group-open:inline">Ocultar prompts</span>
           </summary>
           <div className="mt-4 flex flex-col gap-4">
@@ -315,6 +436,25 @@ function PanelEditor({
               />
             </div>
             <div>
+              <label className={labelClass}>Movimiento de cámara</label>
+              <div className="mb-3 flex flex-wrap gap-1.5">
+                {CAMERA_MOVES.map((m) => {
+                  const on = videoPrompt.includes(m.text);
+                  return (
+                    <button
+                      key={m.text}
+                      type="button"
+                      onClick={() => toggleCamera(m.text)}
+                      className={`rounded-full px-3 py-1 text-[12px] font-medium ring-1 transition ${
+                        on ? "bg-accent/10 text-ink ring-accent" : "bg-white/[0.03] text-ink-2 ring-white/[0.08] hover:text-ink"
+                      }`}
+                    >
+                      {on && "✓ "}
+                      {m.label}
+                    </button>
+                  );
+                })}
+              </div>
               <label className={labelClass}>Prompt de animación</label>
               <textarea
                 className={`${inputClass} resize-y font-mono text-[12px] leading-relaxed`}

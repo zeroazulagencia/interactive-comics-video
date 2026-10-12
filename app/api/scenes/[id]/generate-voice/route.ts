@@ -6,15 +6,16 @@ import { MEDIA_DIR } from "@/lib/paths";
 import { generateVoice, MODEL as VOICE_MODEL } from "@/lib/replicate";
 import { recordCost } from "@/lib/costs";
 import { finishJob, JOB_BUSY, startJob } from "@/lib/jobs";
+import { voiceKey } from "@/lib/voices";
 
 export const maxDuration = 120;
 
-// POST /api/scenes/:id/generate-voice — narra el texto con Replicate (minimax/speech-02-hd)
+// POST /api/scenes/:id/generate-voice — narra el texto con la voz del proyecto (minimax/speech-02-hd)
 export async function POST(
   _req: Request,
   { params }: { params: { id: string } }
 ) {
-  const scene = await prisma.scene.findUnique({ where: { id: params.id } });
+  const scene = await prisma.scene.findUnique({ where: { id: params.id }, include: { comic: true } });
   if (!scene) {
     return NextResponse.json({ error: "Escena no encontrada" }, { status: 404 });
   }
@@ -29,7 +30,8 @@ export async function POST(
     return NextResponse.json(JOB_BUSY, { status: 409 });
   }
   try {
-    const { url: audioSourceUrl, costUsd } = await generateVoice(scene.narration);
+    const voice = { voiceId: scene.comic.voiceId, speed: scene.comic.voiceSpeed };
+    const { url: audioSourceUrl, costUsd } = await generateVoice(scene.narration, voice);
     await recordCost({
       comicId: scene.comicId,
       kind: "voz",
@@ -51,7 +53,7 @@ export async function POST(
     const [updated] = await prisma.$transaction([
       prisma.scene.update({
         where: { id: scene.id },
-        data: { audioUrl },
+        data: { audioUrl, audioVoice: voiceKey(voice.voiceId, voice.speed) },
       }),
       prisma.comic.update({
         where: { id: scene.comicId },

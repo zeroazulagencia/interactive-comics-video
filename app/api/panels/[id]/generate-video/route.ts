@@ -6,14 +6,18 @@ import { MEDIA_DIR, mediaPath } from "@/lib/paths";
 import { generateVideo, VIDEO_MODEL } from "@/lib/replicate";
 import { recordCost } from "@/lib/costs";
 import { finishJob, JOB_BUSY, startJob } from "@/lib/jobs";
+import { ffprobeDuration } from "@/lib/ffmpeg";
+import { autoClipSeconds } from "@/lib/comic";
 
 export const maxDuration = 300;
 
-// POST /api/panels/:id/generate-video — anima la ilustración con prunaai/p-video
+// POST /api/panels/:id/generate-video — anima la ilustración con prunaai/p-video.
+// Body opcional: { duration?: segundos, draft?: boolean }. Sin duration usa la del
+// panel, la del proyecto o la automática (según la narración).
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const panel = await prisma.panel.findUnique({
     where: { id: params.id },
-    include: { scene: { include: { comic: true } } },
+    include: { scene: { include: { comic: true, panels: { orderBy: { order: "asc" } } } } },
   });
   if (!panel) {
     return NextResponse.json({ error: "Panel no encontrado" }, { status: 404 });
@@ -32,21 +36,31 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   const body = await req.json().catch(() => ({}));
-  const duration = Math.max(1, Math.min(20, body.duration ?? 5));
-  const aspectRatio = panel.scene.comic.aspectRatio === "vertical" ? "9:16" : "16:9";
-  const motionStyle = panel.scene.comic.motionStyle?.trim();
-  const prompt = motionStyle ? `${panel.videoPrompt}. Animation style: ${motionStyle}` : panel.videoPrompt;
+  const comic = panel.scene.comic;
+  const draft = body.draft === true;
+  const motionStyle = comic.motionStyle?.trim();
+  const prompt = [
+    panel.videoPrompt,
+    motionStyle ? `Animation style: ${motionStyle}` : "",
+    comic.animateCharacters
+      ? "Characters may move subtly and naturally (breathing, blinking, small gestures) while their faces and bodies stay consistent"
+      : "",
+  ]
+    .filter(Boolean)
+    .join(". ");
+  // Transición: el clip del primer panel termina en la ilustración del siguiente.
+  const next = panel.scene.panels.find((p) => p.order > panel.order && p.imageUrl);
+  const lastFrameUrl = comic.videoTransition && next ? next.imageUrl : null;
 
   if (!startJob(panel.id, panel.scene.comicId, "animacion")) {
     return NextResponse.json(JOB_BUSY, { status: 409 });
   }
   try {
-    const imagePath = mediaPath(panel.imageUrl);
-    const imageBuffer = await readFile(imagePath);
-    const mime = panel.imageUrl.endsWith(".png") ? "image/png" : "image/jpeg";
-    const imageDataUri = `data:${mime};base64,${imageBuffer.toString("base64")}`;
-
-    const { url: videoSourceUrl, costUsd } = await generateVideo(imageDataUri, prompt, duration, aspectRatio);
+    const duration = Number(body.duration) || panel.duration || comic.videoDuration || (await autoDuration(panel.scene));
+    const { url: videoSourceUrl, costUsd } = await generateVideo(await dataUri(panel.imageUrl), prompt, duration, {
+      draft,
+      lastFrameDataUri: lastFrameUrl ? await dataUri(lastFrameUrl) : undefined,
+    });
     await recordCost({
       comicId: panel.scene.comicId,
       kind: "animacion",
@@ -68,7 +82,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const [updated] = await prisma.$transaction([
       prisma.panel.update({
         where: { id: panel.id },
-        data: { videoUrl },
+        data: { videoUrl, videoDraft: draft },
       }),
       prisma.comic.update({
         where: { id: panel.scene.comicId },
@@ -82,4 +96,15 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     finishJob(panel.id, msg);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
+}
+
+async function dataUri(url: string): Promise<string> {
+  const buffer = await readFile(mediaPath(url));
+  const mime = url.endsWith(".png") ? "image/png" : "image/jpeg";
+  return `data:${mime};base64,${buffer.toString("base64")}`;
+}
+
+async function autoDuration(scene: { audioUrl: string | null; narration: string | null }): Promise<number> {
+  const audioSeconds = scene.audioUrl ? await ffprobeDuration(mediaPath(scene.audioUrl)).catch(() => null) : null;
+  return autoClipSeconds(audioSeconds, scene.narration);
 }

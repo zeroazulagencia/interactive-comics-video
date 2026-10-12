@@ -1,6 +1,6 @@
 "use client";
 
-import { comicProgress, sceneProgress, type Comic, type Scene } from "@/lib/comic";
+import { comicProgress, missingPortraits, outdatedVoices, sceneProgress, type Comic, type Scene } from "@/lib/comic";
 import { Badge, Button, Notice, Sheet, Spinner } from "@/components/ui";
 import { SceneEditor, type Jobs } from "./SceneEditor";
 import type { Batch, TaskKind } from "./ProductionStep";
@@ -18,6 +18,7 @@ export function StoryboardStep({
   onRun,
   onStop,
   onGoToProduction,
+  onGoToCast,
   jobs,
 }: {
   comic: Comic;
@@ -32,6 +33,7 @@ export function StoryboardStep({
   onRun: (kind: TaskKind) => void;
   onStop: () => void;
   onGoToProduction: () => void;
+  onGoToCast: () => void;
   jobs: Jobs;
 }) {
   const vertical = comic.aspectRatio === "vertical";
@@ -54,6 +56,18 @@ export function StoryboardStep({
   return (
     <>
       <BatchBar comic={comic} batch={batch} stopping={stopping} onRun={onRun} onStop={onStop} />
+      {!batch && missingPortraits(comic).length > 0 && (
+        <div className="mb-6">
+          <Notice tone="warn">
+            Faltan {missingPortraits(comic).length} retratos del elenco. Se generan antes de las ilustraciones, o puedes
+            revisarlos primero en el{" "}
+            <button type="button" className="font-semibold underline" onClick={onGoToCast}>
+              Elenco
+            </button>
+            .
+          </Notice>
+        </div>
+      )}
       {errorCount > 0 && !batch && (
         <div className="mb-6">
           <Notice tone="error">
@@ -116,10 +130,9 @@ export function StoryboardStep({
         {openScene && (
           <SceneEditor
             key={openScene.id}
-            comicId={comic.id}
+            comic={comic}
             jobs={jobs}
             scene={openScene}
-            aspectRatio={comic.aspectRatio}
             activeId={activeId}
             onChanged={onChanged}
             onDeleted={() => {
@@ -148,8 +161,12 @@ function BatchBar({
   onStop: () => void;
 }) {
   const p = comicProgress(comic);
+  const outdated = outdatedVoices(comic).length;
   const actions: { kind: TaskKind; label: string; pending: number; done: string }[] = [
     { kind: "voces", label: "Generar todas las voces", pending: p.scenes - p.voices, done: "Voces listas" },
+    ...(outdated > 0
+      ? [{ kind: "revoces" as const, label: "Rehacer voces con la voz nueva", pending: outdated, done: "" }]
+      : []),
     {
       kind: "ilustraciones",
       label: "Generar todas las ilustraciones",
@@ -256,6 +273,7 @@ function SceneTile({
           <Badge tone={tone(p.videos === p.panels && p.panels > 0, p.videos > 0)}>
             Animación {p.videos}/{p.panels}
           </Badge>
+          {scene.panels.some((panel) => panel.videoUrl && panel.videoDraft) && <Badge tone="warn">Borrador</Badge>}
         </div>
       </div>
     </button>

@@ -18,8 +18,6 @@ const VIDEO_MODEL_VERSION = "c48fa8ec65b13143cb552ab98ea17984eab9d70e9fe99479117
 // meta/musicgen (también comunitario, requiere version fija).
 const MUSIC_MODEL_VERSION = "671ac645ce5e552cc63a54a2bbff63fcf798043055d2dac5fc9e36a837eedcfb";
 
-export const VOICE_ID = process.env.REPLICATE_VOICE_ID ?? "Spanish_ReliableMan";
-
 // wan2.1-with-lora solo acepta estos valores de "frames" (a 16fps: ~1 a ~5s).
 export const VIDEO_FRAME_OPTIONS = [17, 33, 49, 65, 81] as const;
 export type VideoFrames = (typeof VIDEO_FRAME_OPTIONS)[number];
@@ -57,23 +55,30 @@ async function createAndPoll(
   { pollMs = 3000, maxWaitMs = 5 * 60 * 1000 } = {}
 ): Promise<Result> {
   let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token()}`,
-        Prefer: "wait",
-      },
-      body: JSON.stringify(body),
-    });
-  } catch (e) {
-    const cause =
-      e instanceof Error && e.cause
-        ? ` (causa: ${String((e.cause as { message?: string })?.message ?? e.cause)})`
-        : "";
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`No se pudo conectar con Replicate: ${msg}${cause}`);
+  // Con poco saldo, Replicate limita a 1 petición seguida (429 con retry_after):
+  // se espera lo indicado y se reintenta.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token()}`,
+          Prefer: "wait",
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      const cause =
+        e instanceof Error && e.cause
+          ? ` (causa: ${String((e.cause as { message?: string })?.message ?? e.cause)})`
+          : "";
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`No se pudo conectar con Replicate: ${msg}${cause}`);
+    }
+    if (res.status !== 429 || attempt >= 5) break;
+    const retryAfter = Number((await res.clone().json().catch(() => ({})))?.retry_after) || 10;
+    await new Promise((r) => setTimeout(r, (retryAfter + 1) * 1000));
   }
 
   let data: Prediction = await res.json();
@@ -118,15 +123,18 @@ function runModelAndPoll(
 }
 
 // Genera narración a partir de texto y devuelve la URL temporal del audio (mp3) y su costo.
-export async function generateVoice(text: string): Promise<{ url: string; costUsd: number }> {
+export async function generateVoice(
+  text: string,
+  voice: { voiceId: string; speed: number }
+): Promise<{ url: string; costUsd: number }> {
   const { output, metrics } = await runModelAndPoll(
     MODEL,
     {
       text,
-      voice_id: VOICE_ID,
+      voice_id: voice.voiceId,
       language_boost: "Spanish",
       emotion: "neutral",
-      speed: 1.15,
+      speed: voice.speed,
       audio_format: "mp3",
     },
     { maxWaitMs: 100 * 1000 }
@@ -139,15 +147,16 @@ export async function generateVoice(text: string): Promise<{ url: string; costUs
 export type VideoAspectRatio = "16:9" | "9:16";
 
 // Anima una imagen con prunaai/p-video (image-to-video de alta calidad).
-// Parámetros: duración en segundos, resolución 720p, fps 24.
+// Parámetros: duración en segundos, resolución 720p, fps 24. Con lastFrame, el
+// clip termina en esa imagen; con draft, genera una vista previa más barata.
 // Retorna la URL pública del mp4 y su costo.
 export async function generateVideo(
   imageDataUri: string,
   prompt: string,
   duration: number,
-  aspectRatio: VideoAspectRatio = "16:9"
+  opts: { draft?: boolean; lastFrameDataUri?: string } = {}
 ): Promise<{ url: string; costUsd: number }> {
-  const seconds = Math.max(1, Math.min(20, Math.round(duration)));
+  const seconds = Math.max(1, Math.min(10, Math.round(duration)));
   const { output, metrics } = await runModelAndPoll(
     VIDEO_MODEL,
     {
@@ -156,6 +165,8 @@ export async function generateVideo(
       duration: seconds,
       fps: 24,
       resolution: "720p",
+      draft: !!opts.draft,
+      ...(opts.lastFrameDataUri ? { last_frame_image: opts.lastFrameDataUri } : {}),
       disable_safety_filter: true,
       prompt_upsampling: true,
     },
@@ -163,7 +174,7 @@ export async function generateVideo(
   );
   const url = Array.isArray(output) ? output[0] : output;
   if (typeof url !== "string") throw new Error("Replicate no devolvió un video válido.");
-  return { url, costUsd: videoCost(metrics.video_output_duration_seconds ?? seconds) };
+  return { url, costUsd: videoCost(metrics.video_output_duration_seconds ?? seconds, opts.draft) };
 }
 
 // Fallback: wan-video/wan2.1-with-lora (modelo comunitario, requiere version hash).

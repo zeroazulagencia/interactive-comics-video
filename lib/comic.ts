@@ -1,5 +1,7 @@
 // Tipos y utilidades compartidas por la interfaz (sin dependencias de servidor).
 
+import { DEFAULT_VOICE_ID, DEFAULT_VOICE_SPEED, voiceKey } from "@/lib/voices";
+
 export type Panel = {
   id: string;
   order: number;
@@ -7,6 +9,17 @@ export type Panel = {
   imageUrl: string | null;
   videoPrompt: string | null;
   videoUrl: string | null;
+  videoDraft: boolean;
+  duration: number | null;
+  characters: { id: string }[];
+};
+
+export type Character = {
+  id: string;
+  order: number;
+  name: string;
+  description: string;
+  imageUrl: string | null;
 };
 
 export type Scene = {
@@ -16,10 +29,11 @@ export type Scene = {
   summary: string | null;
   narration: string | null;
   audioUrl: string | null;
+  audioVoice: string | null;
   panels: Panel[];
 };
 
-export type JobKind = "voz" | "ilustracion" | "animacion" | "mezcla";
+export type JobKind = "voz" | "retrato" | "ilustracion" | "animacion" | "mezcla";
 
 // Generaciones en curso y fallos recientes, por id de escena, panel o comic.
 export type ComicJobs = { running: Record<string, JobKind>; errors: Record<string, string> };
@@ -32,6 +46,11 @@ export type Comic = {
   prompt: string | null;
   artStyle: string | null;
   motionStyle: string | null;
+  voiceId: string;
+  voiceSpeed: number;
+  videoDuration: number;
+  videoTransition: boolean;
+  animateCharacters: boolean;
   aspectRatio: string;
   finalVideoUrl: string | null;
   finalVideoOutdated: boolean;
@@ -40,6 +59,8 @@ export type Comic = {
   youtubeDescription: string | null;
   youtubeTags: string | null;
   scenes: Scene[];
+  characters: Character[];
+  costUsd?: number; // gasto registrado en APIs (GET /api/comics/:id)
   jobs?: ComicJobs;
 };
 
@@ -86,6 +107,7 @@ export type CostBreakdown = {
 export const COST_KIND_LABELS: Record<string, string> = {
   guion: "Guion",
   voz: "Voces",
+  retrato: "Retratos",
   ilustracion: "Ilustraciones",
   animacion: "Animaciones",
   musica: "Música",
@@ -97,6 +119,13 @@ export function formatUsd(n: number): string {
 }
 
 export const DEFAULT_AUTHOR = "Cristian Parada";
+
+// Duración automática de cada clip: la mitad de la narración (cada escena tiene
+// 2 paneles), entre 3 y 8 segundos. Sin audio se estima por la longitud del texto.
+export function autoClipSeconds(audioSeconds: number | null, narration: string | null): number {
+  const total = audioSeconds ?? (narration ?? "").length / 15;
+  return Math.min(8, Math.max(3, Math.ceil(total / 2)));
+}
 
 export const DEFAULT_VIDEO_PROMPT =
   "gentle camera motion with slow pan, atmospheric dust particles floating in light, subtle shadow shifts, soft ambient movement throughout the scene";
@@ -229,4 +258,71 @@ export function findPanel(c: Comic, panelId: string): Panel | undefined {
 
 export function findScene(c: Comic, sceneId: string): Scene | undefined {
   return c.scenes.find((s) => s.id === sceneId);
+}
+
+// ---- Presupuesto ----
+
+// Límite de gasto por proyecto (USD).
+export const BUDGET_USD = 5;
+
+// Costos unitarios aproximados para estimar lo que falta por generar.
+const EST_USD = {
+  portrait: 0.014,
+  image: 0.011,
+  imagePerRef: 0.008,
+  voicePerChar: 0.0001,
+  videoPerSecond: 0.02,
+  music: 0.07,
+};
+
+export type PendingCost = {
+  voces: number;
+  revoces: number;
+  retratos: number;
+  ilustraciones: number;
+  animaciones: number;
+  mezcla: number;
+};
+
+export function clipSeconds(c: Comic, s: Scene, p: Panel): number {
+  return p.duration || c.videoDuration || autoClipSeconds(null, s.narration);
+}
+
+// Personajes sin retrato que aparecen en algún panel (deben generarse antes de ilustrar).
+export function missingPortraits(c: Comic): Character[] {
+  const used = new Set(c.scenes.flatMap((s) => s.panels.flatMap((p) => (p.characters ?? []).map((x) => x.id))));
+  return (c.characters ?? []).filter((ch) => !ch.imageUrl && used.has(ch.id));
+}
+
+// La voz de la escena se generó con otra voz o velocidad que la actual del
+// proyecto. Los audios anteriores a la elección de voz usaban la voz por defecto.
+export function isVoiceOutdated(c: Comic, s: Scene): boolean {
+  if (!s.audioUrl) return false;
+  const used = s.audioVoice ?? voiceKey(DEFAULT_VOICE_ID, DEFAULT_VOICE_SPEED);
+  return used !== voiceKey(c.voiceId, c.voiceSpeed);
+}
+
+export function outdatedVoices(c: Comic): Scene[] {
+  return c.scenes.filter((s) => isVoiceOutdated(c, s));
+}
+
+// Estimación (USD) de lo que falta generar, por tipo de tarea.
+export function estimatePending(c: Comic): PendingCost {
+  const voice = (s: Scene) => (s.narration ?? "").length * EST_USD.voicePerChar;
+  let ilustraciones = 0;
+  let animaciones = 0;
+  for (const s of c.scenes) {
+    for (const p of s.panels) {
+      if (!p.imageUrl) ilustraciones += EST_USD.image + (p.characters ?? []).length * EST_USD.imagePerRef;
+      if (!p.videoUrl) animaciones += clipSeconds(c, s, p) * EST_USD.videoPerSecond;
+    }
+  }
+  return {
+    voces: c.scenes.filter((s) => !s.audioUrl).reduce((sum, s) => sum + voice(s), 0),
+    revoces: outdatedVoices(c).reduce((sum, s) => sum + voice(s), 0),
+    retratos: missingPortraits(c).length * EST_USD.portrait,
+    ilustraciones,
+    animaciones,
+    mezcla: !c.finalVideoUrl || c.finalVideoOutdated ? EST_USD.music : 0,
+  };
 }

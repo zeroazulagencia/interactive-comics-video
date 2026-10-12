@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { comicInclude, prisma } from "@/lib/prisma";
+import { idsFor } from "@/lib/cast";
 import { generateScenes, TEXT_MODEL } from "@/lib/openai";
 import { recordCost } from "@/lib/costs";
 
@@ -22,21 +23,31 @@ export async function POST(
   }
 
   try {
-    const { scenes, musicPrompt, costUsd } = await generateScenes(
+    const { cast, scenes, musicPrompt, costUsd } = await generateScenes(
       comic.prompt,
       comic.artStyle ?? "",
-      comic.motionStyle ?? ""
+      comic.motionStyle ?? "",
+      comic.animateCharacters
     );
     await recordCost({ comicId: comic.id, kind: "guion", provider: "openai", model: TEXT_MODEL, amountUsd: costUsd });
 
-    // Reemplaza las escenas anteriores en una sola transacción: si algo falla,
-    // se conservan las existentes.
-    await prisma.$transaction([
-      prisma.scene.deleteMany({ where: { comicId: comic.id } }),
-      ...scenes.map((s, i) => {
+    // Reemplaza escenas y elenco anteriores en una sola transacción: si algo
+    // falla, se conservan los existentes.
+    await prisma.$transaction(async (tx) => {
+      await tx.scene.deleteMany({ where: { comicId: comic.id } });
+      await tx.character.deleteMany({ where: { comicId: comic.id } });
+      const byName = new Map<string, string>();
+      for (const [i, c] of cast.entries()) {
+        const created = await tx.character.create({
+          data: { comicId: comic.id, order: i + 1, name: c.name, description: c.description },
+        });
+        byName.set(c.name.toLowerCase(), created.id);
+      }
+      for (const [i, s] of scenes.entries()) {
         const [p1, p2] = s.imagePrompts;
         const [v1, v2] = s.videoPrompts;
-        return prisma.scene.create({
+        const [c1, c2] = s.panelCast;
+        await tx.scene.create({
           data: {
             comicId: comic.id,
             order: i + 1,
@@ -45,28 +56,20 @@ export async function POST(
             narration: s.narration,
             panels: {
               create: [
-                { order: 1, imagePrompt: p1, videoPrompt: v1 },
-                { order: 2, imagePrompt: p2, videoPrompt: v2 },
+                { order: 1, imagePrompt: p1, videoPrompt: v1, characters: { connect: idsFor(c1, byName) } },
+                { order: 2, imagePrompt: p2, videoPrompt: v2, characters: { connect: idsFor(c2, byName) } },
               ],
             },
           },
         });
-      }),
-      prisma.comic.update({
+      }
+      await tx.comic.update({
         where: { id: comic.id },
         data: { finalVideoOutdated: true, musicPrompt: musicPrompt || null },
-      }),
-    ]);
-
-    const updated = await prisma.comic.findUnique({
-      where: { id: comic.id },
-      include: {
-        scenes: {
-          orderBy: { order: "asc" },
-          include: { panels: { orderBy: { order: "asc" } } },
-        },
-      },
+      });
     });
+
+    const updated = await prisma.comic.findUnique({ where: { id: comic.id }, include: comicInclude });
     return NextResponse.json(updated);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error generando escenas";

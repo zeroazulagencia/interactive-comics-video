@@ -100,7 +100,7 @@ function renderSubtitlePng(text: string, width: number, height: number): Buffer 
   return resvg.render().asPng();
 }
 
-async function ffprobeDuration(file: string): Promise<number> {
+export async function ffprobeDuration(file: string): Promise<number> {
   const { stdout } = await run(FFPROBE_PATH, [
     "-v", "error",
     "-show_entries", "format=duration",

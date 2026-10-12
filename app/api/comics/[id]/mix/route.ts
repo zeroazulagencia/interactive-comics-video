@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
-import { prisma } from "@/lib/prisma";
+import { comicInclude, prisma } from "@/lib/prisma";
 import { MEDIA_DIR, mediaPath } from "@/lib/paths";
 import { mixComic } from "@/lib/ffmpeg";
 import { generateMusic, MUSIC_MODEL } from "@/lib/replicate";
@@ -93,12 +93,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const updated = await prisma.comic.update({
       where: { id: comic.id },
       data: { finalVideoUrl, finalVideoOutdated: false },
-      include: {
-        scenes: {
-          orderBy: { order: "asc" },
-          include: { panels: { orderBy: { order: "asc" } } },
-        },
-      },
+      include: comicInclude,
     });
     finishJob(comic.id);
     return NextResponse.json(updated);

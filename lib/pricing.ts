@@ -3,7 +3,7 @@
 // páginas de cada modelo en replicate.com. Actualizar aquí si cambian.
 
 export type Provider = "openai" | "replicate";
-export type CostKind = "guion" | "voz" | "ilustracion" | "animacion" | "musica" | "youtube";
+export type CostKind = "guion" | "voz" | "retrato" | "ilustracion" | "animacion" | "musica" | "youtube";
 
 // Modelos de texto: USD por 1M de tokens.
 const TEXT_PRICES: Record<string, { input: number; cachedInput: number; output: number }> = {
@@ -14,11 +14,14 @@ const DEFAULT_TEXT_PRICE = TEXT_PRICES["gpt-5.5"];
 // Modelos de imagen: USD por 1M de tokens.
 const IMAGE_PRICES: Record<string, { textInput: number; imageInput: number; imageOutput: number }> = {
   "gpt-image-1": { textInput: 5, imageInput: 10, imageOutput: 40 },
+  "gpt-image-1-mini": { textInput: 2, imageInput: 2.5, imageOutput: 8 },
+  "gpt-image-2.5-flare": { textInput: 5, imageInput: 8, imageOutput: 30 },
 };
-const DEFAULT_IMAGE_PRICE = IMAGE_PRICES["gpt-image-1"];
+const DEFAULT_IMAGE_PRICE = IMAGE_PRICES["gpt-image-2.5-flare"];
 
 const VOICE_USD_PER_1K_CHARS = 0.1; // minimax/speech-02-hd
 const VIDEO_USD_PER_SECOND_720P = 0.02; // prunaai/p-video, sin draft
+const VIDEO_DRAFT_USD_PER_SECOND_720P = 0.005; // prunaai/p-video, modo borrador
 const MUSIC_USD_PER_GPU_SECOND = 0.0014; // meta/musicgen en Nvidia A100 (80GB)
 
 export type TextUsage = {
@@ -53,8 +56,8 @@ export function voiceCost(characters: number): number {
   return (characters / 1000) * VOICE_USD_PER_1K_CHARS;
 }
 
-export function videoCost(seconds: number): number {
-  return seconds * VIDEO_USD_PER_SECOND_720P;
+export function videoCost(seconds: number, draft = false): number {
+  return seconds * (draft ? VIDEO_DRAFT_USD_PER_SECOND_720P : VIDEO_USD_PER_SECOND_720P);
 }
 
 export function musicCost(predictSeconds: number): number {
